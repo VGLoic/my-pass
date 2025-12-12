@@ -7,9 +7,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
+mod accounts;
+
 pub fn app_router() -> Router {
     Router::new()
         .route("/health", get(get_healthcheck))
+        .nest("/accounts", accounts::accounts_router())
         .fallback(not_found)
 }
 

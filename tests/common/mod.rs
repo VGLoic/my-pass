@@ -13,6 +13,7 @@ use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[allow(dead_code)]
 pub struct InstanceState {
+    pub reqwest_client: reqwest::Client,
     pub server_url: String,
 }
 
@@ -95,6 +96,7 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
 
     Ok(InstanceState {
         server_url: format!("http://{}:{}", addr.ip(), addr.port()),
+        reqwest_client: reqwest::Client::new(),
     })
 }
 
