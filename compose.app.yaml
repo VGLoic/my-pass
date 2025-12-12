@@ -8,13 +8,27 @@
 # database or a cache. For examples, see the Awesome Compose repository:
 # https://github.com/docker/awesome-compose
 services:
+  server:
+    build:
+      context: .
+      target: final
+    ports:
+      - 3000:3000
+    environment:
+      - DATABASE_URL=postgresql://admin:admin@mypass-db:5432/mypass
+      - PORT=3000
+    networks:
+      - mypass-app
+    depends_on:
+      db:
+        condition: service_healthy
   db:
     container_name: mypass-db
     image: postgres
     restart: always
     user: postgres
     volumes:
-      - db-data:/var/lib/postgresql
+      - db-data:/var/lib/postgresql/data
     environment:
       - POSTGRES_USER=admin
       - POSTGRES_PASSWORD=admin

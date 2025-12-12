@@ -15,6 +15,9 @@ pub struct Config {
     pub port: u16,
     /// Application log level, has priority over `RUST_LOG` environment variable
     pub log_level: Level,
+    /// Database connection URL
+    /// Format: `postgresql://<Postgres user>:<Postgres password>@<Postgres host>:<Postgres port>/<Postgres DB>`
+    pub database_url: String,
 }
 
 impl Config {
@@ -37,12 +40,37 @@ impl Config {
             }
         };
 
+        let database_url = match parse_required_env_variable::<String>("DATABASE_URL") {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(e);
+                String::new()
+            }
+        };
+
         if !errors.is_empty() {
             return Err(errors);
         }
 
-        Ok(Config { port, log_level })
+        Ok(Config {
+            port,
+            log_level,
+            database_url,
+        })
     }
+}
+
+fn parse_required_env_variable<T>(key: &str) -> Result<T, anyhow::Error>
+where
+    T: FromStr,
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+{
+    parse_env_variable::<T>(key)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Required environment variable `{}` is missing or empty",
+            key
+        )
+    })
 }
 
 fn parse_env_variable<T>(key: &str) -> Result<Option<T>, anyhow::Error>

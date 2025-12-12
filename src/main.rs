@@ -7,6 +7,7 @@ use axum::{
 };
 use dotenvy::dotenv;
 use my_pass::{Config, routes::app_router};
+use sqlx::postgres::PgPoolOptions;
 use tokio::signal;
 use tower_http::{
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
@@ -46,6 +47,28 @@ async fn main() -> Result<(), anyhow::Error> {
                 .with_filter(Into::<LevelFilter>::into(config.log_level)),
         )
         .init();
+
+    let pool = match PgPoolOptions::new()
+        .max_connections(5)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&config.database_url)
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            let err = format!("Failed to establish connection to database {e}");
+            error!(err);
+            return Err(anyhow::anyhow!(err));
+        }
+    };
+
+    if let Err(e) = sqlx::migrate!("./migrations").run(&pool).await {
+        let err = format!("Failed to run database migrations: {e}");
+        error!(err);
+        return Err(anyhow::anyhow!(err));
+    };
+
+    info!("Successfully ran migrations");
 
     let x_request_id = HeaderName::from_static(REQUEST_ID_HEADER);
 
