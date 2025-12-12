@@ -43,6 +43,25 @@ The application can also be run using a single `docker compose` command:
 docker compose -f compose.app.yaml up --build
 ```
 
+### Integration tests
+
+Integration tests require a database running and exposed on port 5433, use the related docker compose for it:
+```bash
+docker compose -f compose.integration.yaml up
+```
+
+Once the database is up, integration tests can be run:
+```bash
+cargo test --tests
+```
+
+Alternatively, a script has been added in order to wrap the tests with the database container mounting and unmounting:
+```bash
+# Allow the script to run
+chmod +x scripts/integration-test.sh
+./scripts/integration-test.sh
+```
+
 ### Database interaction and migration
 
 This repository uses [`sqlx`](https://github.com/launchbadge/sqlx) for database connectivity and migrations.
