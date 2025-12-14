@@ -22,7 +22,9 @@ pub fn default_test_config() -> Config {
     Config {
         port: 0,
         log_level: Level::WARN,
-        database_url: "postgresql://admin:admin@localhost:5433/mypass".to_string(),
+        database_url: "postgresql://admin:admin@localhost:5433/mypass"
+            .to_string()
+            .into(),
     }
 }
 
@@ -36,7 +38,7 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
     let pool = match PgPoolOptions::new()
         .max_connections(5)
         .acquire_timeout(Duration::from_secs(5))
-        .connect(&config.database_url)
+        .connect(config.database_url.unsafe_inner())
         .await
     {
         Ok(c) => c,

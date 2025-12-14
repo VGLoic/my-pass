@@ -51,7 +51,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let pool = match PgPoolOptions::new()
         .max_connections(5)
         .acquire_timeout(Duration::from_secs(5))
-        .connect(&config.database_url)
+        .connect(config.database_url.unsafe_inner())
         .await
     {
         Ok(c) => c,

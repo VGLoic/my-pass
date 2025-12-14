@@ -9,6 +9,8 @@ use tracing::{error, warn};
 
 mod accounts;
 
+pub use accounts::SignUpRequestHttpBody;
+
 pub fn app_router() -> Router {
     Router::new()
         .route("/health", get(get_healthcheck))

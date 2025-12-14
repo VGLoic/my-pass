@@ -38,11 +38,10 @@ In each of the following sections, the implementation details for each user stor
 
 - The user fills out a signup form with their email and password,
 - The client generates a random salt and uses Argon2id to derive a Ed25519 key pair from the password and salt,
-- The client signs the password using the private key to prove possession of the private key,
 - The client generates a random salt for symmetric key derivation,
 - The client uses Argon2id to derive a symmetric key from the password and the salt,
 - The client symmetrically encrypts the private key using AES-256-GCM with the derived symmetric key,
-- The client sends the email, password, the encrypted private key, the derivation key salt, the public key and the signature to the server using the endpoint described below.
+- The client sends the email, password, the encrypted private key, the derivation key salt and the public key to the server using the endpoint described below.
 
 **Server Side:**
 
@@ -54,13 +53,12 @@ Endpoint: `POST /api/signup` with request body:
   "encryptedPrivateKey": "<user_encrypted_private_key>",
   "symmetricKeySalt": "<salt_for_symmetric_key_derivation>",
   "publicKey": "<user_public_key>",
-  "signature": "<password_signature>"
 }
 ```
 
 Handler logic:
-1. Validate the email, password, encrypted private key, salt, public key and signature format,
-2. Verify the signature of the password using the provided public key,
+1. Validate the email, password, encrypted private key, salt, public key format,
+2. Decrypts the private key using the password and the salt to verify the provided public key matches the derived public key,
 3. Hashes the password using Argon2id,
 4. Generates a random verification token, it is valid for 15 minutes,
 5. Stores in database:
