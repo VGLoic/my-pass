@@ -307,6 +307,12 @@ impl Password {
             .verify_password(self.0.as_bytes(), &password_hash)
             .map_err(|e| anyhow!(e).context("failed to verify password"))
     }
+
+    /// Reference the inner value
+    /// Use it with caution
+    pub fn unsafe_inner(&self) -> &str {
+        &self.0
+    }
 }
 
 impl std::fmt::Display for Password {
