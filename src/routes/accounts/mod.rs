@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 pub mod domain;
 pub mod repository;
 use domain::{Account, CreateAccountError, GetAccountError, SignupRequest, SignupRequestError};
+use tracing::info;
 
 pub fn accounts_router() -> Router<AppState> {
     Router::new()
@@ -71,6 +72,8 @@ async fn sign_up(
             }
             CreateAccountError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
+
+    info!("Account created with email: {}", created_account.email);
 
     Ok((
         StatusCode::CREATED,
