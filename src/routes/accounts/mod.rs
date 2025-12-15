@@ -20,11 +20,29 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::warn;
 
+mod repository;
+
 pub fn accounts_router() -> Router {
     Router::new()
         .route("/signup", post(sign_up))
         // Added a test route for checking user existence
         .route("/{email}/test-exists", get(test_user_exists))
+}
+
+// ##################################################
+// ############### ACCOUNT DEFINITION ###############
+// ##################################################
+
+#[derive(Debug, Clone)]
+pub struct Account {
+    pub id: uuid::Uuid,
+    pub email: String,
+    pub password_hash: Opaque<String>,
+    pub symmetric_key_salt: Opaque<[u8; 16]>,
+    pub encrypted_private_key: Opaque<String>,
+    pub public_key: Opaque<[u8; 32]>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 // #######################################
@@ -34,17 +52,17 @@ pub fn accounts_router() -> Router {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SignUpRequestHttpBody {
-    // Email of the user
+    /// Email of the user
     pub email: String,
-    // Password of the user
+    /// Password of the user
     pub password: Opaque<String>,
-    // Salt used for deriving the symmetric key from the password, must be base64 encoded
+    /// Salt used for deriving the symmetric key from the password, must be base64 encoded
     pub symmetric_key_salt: Opaque<String>,
-    // Encrypted Ed25519 private key of the user using AES-256-GCM with a key derived from the password and symmetric_key_salt, must be base64 encoded
+    /// Encrypted Ed25519 private key of the user using AES-256-GCM with a key derived from the password and symmetric_key_salt, must be base64 encoded
     pub encrypted_private_key: Opaque<String>,
-    // Nonce used for the encryption of the private key, must be 12 bytes encoded in base64
+    /// Nonce used for the encryption of the private key, must be 12 bytes encoded in base64
     pub encrypted_private_key_nonce: Opaque<String>,
-    // Public key of the user, must be base64 encoded
+    /// Public key of the user, must be base64 encoded
     pub public_key: Opaque<String>,
 }
 
@@ -123,7 +141,6 @@ async fn sign_up(
     Ok((StatusCode::CREATED, "Account created"))
 }
 
-// REMIND ME TO REMOVE
 #[allow(dead_code)]
 struct SignupRequest {
     email: String,
@@ -288,6 +305,14 @@ impl SignupRequest {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum CreateAccountError {
+    #[error("An account with the given email already exists")]
+    EmailAlreadyCreated,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
 // ##############################################################
 // ############### TEST EXISTENCE - TO BE REMOVED ###############
 // ##############################################################
@@ -296,24 +321,38 @@ async fn test_user_exists(Path(_email): Path<String>) -> Result<StatusCode, ApiE
     Ok(StatusCode::OK)
 }
 
+#[derive(Debug, Error)]
+pub enum GetAccountError {
+    #[error("Account not found")]
+    NotFound,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_valid_signup_request() {
-        let signup_request: SignUpRequestHttpBody = Faker.fake();
-        let result = SignupRequest::try_from_http_body(signup_request.clone());
+        let http_signup_request: SignUpRequestHttpBody = Faker.fake();
+        let result = SignupRequest::try_from_http_body(http_signup_request.clone());
         assert!(result.is_ok());
-        let derived_signup_request = result.unwrap();
-        assert_eq!(derived_signup_request.email, signup_request.email);
+        let signup_request = result.unwrap();
+        assert_eq!(signup_request.email, signup_request.email);
         assert_eq!(
-            derived_signup_request.public_key.unsafe_inner(),
-            signup_request.public_key.unsafe_inner().as_bytes()
+            signup_request.public_key.unsafe_inner(),
+            BASE64_STANDARD
+                .decode(http_signup_request.public_key.unsafe_inner())
+                .unwrap()
+                .as_slice()
         );
         assert_eq!(
-            derived_signup_request.symmetric_key_salt.unsafe_inner(),
-            signup_request.symmetric_key_salt.unsafe_inner().as_bytes()
+            signup_request.symmetric_key_salt.unsafe_inner(),
+            BASE64_STANDARD
+                .decode(http_signup_request.symmetric_key_salt.unsafe_inner())
+                .unwrap()
+                .as_slice()
         );
     }
 
