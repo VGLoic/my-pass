@@ -10,7 +10,6 @@ use base64::{Engine, prelude::BASE64_STANDARD};
 use ed25519_dalek::SigningKey;
 use sqlx::prelude::FromRow;
 use thiserror::Error;
-use tracing::warn;
 
 // ##################################################
 // ############### ACCOUNT DEFINITION ###############
@@ -140,16 +139,9 @@ impl SignupRequest {
                 decoded_encrypted_private_key_nonce_aes_formatted,
                 decoded_encrypted_private_key.as_ref(),
             )
-            .map_err(|e| {
-                warn!("Private key decryption error: {}", e);
-                SignupRequestError::InvalidKeyPair
-            })?;
+            .map_err(|_| SignupRequestError::InvalidKeyPair)?;
 
         if decrypted_private_key.len() != 32 {
-            warn!(
-                "Decrypted private key has invalid length: {}",
-                decrypted_private_key.len()
-            );
             return Err(SignupRequestError::InvalidKeyPair);
         }
         let decrypted_private_key: [u8; 32] = slice_to_array(&decrypted_private_key);
