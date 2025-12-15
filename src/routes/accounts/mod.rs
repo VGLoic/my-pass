@@ -145,6 +145,7 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AccountResponse {
     pub id: uuid::Uuid,
     pub email: String,
