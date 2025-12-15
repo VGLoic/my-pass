@@ -35,7 +35,13 @@ async fn test_signup() {
             .unwrap()
             .status(),
         StatusCode::OK
-    )
+    );
+
+    assert!(
+        instance_state
+            .accounts_notifier
+            .has_account_signed_up(&signup_body.email, 1)
+    );
 }
 
 #[tokio::test]
@@ -72,5 +78,11 @@ async fn test_successive_signup() {
             .unwrap()
             .status(),
         StatusCode::BAD_REQUEST
+    );
+
+    assert!(
+        instance_state
+            .accounts_notifier
+            .has_account_signed_up(&signup_body.email, 1)
     );
 }
