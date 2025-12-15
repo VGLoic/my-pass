@@ -71,7 +71,7 @@ async fn main() -> Result<(), anyhow::Error> {
     info!("Successfully ran migrations");
 
     let accounts_repository =
-        my_pass::routes::accounts::repository::PsqlAccountsRepository::new(pool);
+        my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool);
 
     let x_request_id = HeaderName::from_static(REQUEST_ID_HEADER);
 
