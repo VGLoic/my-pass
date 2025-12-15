@@ -286,7 +286,8 @@ impl Password {
             return Err(PasswordError::Empty);
         }
         // Password must be at least 10 characters long, at most 40 characters long
-        let password_has_valid_length = v.len() >= 10 && v.len() <= 40;
+        let char_count = v.chars().count();
+        let password_has_valid_length = char_count >= 10 && char_count <= 40;
         // Password must contain:
         //  - at least two capital letters,
         //  - at least two numbers,
