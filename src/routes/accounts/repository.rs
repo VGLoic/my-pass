@@ -1,6 +1,7 @@
 use sqlx::{Pool, Postgres, query_as};
 
 use super::{Account, CreateAccountError, GetAccountError, SignupRequest};
+use crate::newtypes::Email;
 
 /// Defines the AccountsRepository trait for account-related database operations.
 #[async_trait::async_trait]
@@ -32,7 +33,7 @@ pub trait AccountsRepository: Send + Sync {
     /// # Errors
     /// - MUST return [GetAccountError::NotFound] if no account with the given email exists.
     /// - MUST return [GetAccountError::Unknown] for any other errors encountered during retrieval.
-    async fn get_account_by_email(&self, email: &str) -> Result<Account, GetAccountError>;
+    async fn get_account_by_email(&self, email: &Email) -> Result<Account, GetAccountError>;
 }
 
 pub struct PsqlAccountsRepository {
@@ -92,7 +93,7 @@ impl AccountsRepository for PsqlAccountsRepository {
         }
     }
 
-    async fn get_account_by_email(&self, email: &str) -> Result<Account, GetAccountError> {
+    async fn get_account_by_email(&self, email: &Email) -> Result<Account, GetAccountError> {
         // The `r` is for raw string literals in Rust, allowing us to write SQL queries without caring about escaping characters.
         // The `#` is a delimiter that allows us to include double quotes in the SQL query without needing to escape them.
         let query_result = query_as::<_, Account>(

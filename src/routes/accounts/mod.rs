@@ -38,6 +38,7 @@ pub fn accounts_router() -> Router<AppState> {
 pub struct Account {
     id: uuid::Uuid,
     email: String,
+    #[allow(dead_code)]
     password_hash: Opaque<String>,
     symmetric_key_salt: Opaque<[u8; 16]>,
     encrypted_private_key: Opaque<String>,
@@ -362,8 +363,23 @@ impl From<Account> for AccountResponse {
 // ############### TEST EXISTENCE - TO BE REMOVED ###############
 // ##############################################################
 
-async fn test_user_exists(Path(_email): Path<String>) -> Result<StatusCode, ApiError> {
-    Ok(StatusCode::OK)
+async fn test_user_exists(
+    State(app_state): State<AppState>,
+    Path(email): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let email = Email::new(&email).map_err(|e| match e {
+        EmailError::Empty => ApiError::BadRequest("Email cannot be empty".to_string()),
+        EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
+    })?;
+    match app_state
+        .accounts_repository
+        .get_account_by_email(&email)
+        .await
+    {
+        Ok(_) => Ok(StatusCode::OK),
+        Err(GetAccountError::NotFound) => Ok(StatusCode::NOT_FOUND),
+        Err(e) => Err(ApiError::InternalServerError(e.into())),
+    }
 }
 
 #[derive(Debug, Error)]

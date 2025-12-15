@@ -20,20 +20,19 @@ async fn test_signup() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
 
-    // assert_eq!(
-    //     instance_state
-    //         .reqwest_client
-    //         .get(format!(
-    //             "{}/accounts/{}/test-exists",
-    //             &instance_state.server_url, signup_body.email
-    //         ))
-    //         .json(&signup_body)
-    //         .send()
-    //         .await
-    //         .unwrap()
-    //         .status(),
-    //     StatusCode::OK
-    // )
+    assert_eq!(
+        instance_state
+            .reqwest_client
+            .get(format!(
+                "{}/accounts/{}/test-exists",
+                &instance_state.server_url, signup_body.email
+            ))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    )
 }
 
 #[tokio::test]
