@@ -4,6 +4,7 @@ CREATE EXTENSION IF NOT EXISTS "moddatetime";
 
 CREATE TABLE "account" (
     id                          UUID        NOT NULL    PRIMARY KEY DEFAULT uuid_generate_v4 (),
+    -- The UNIQUE constraint on email creates an index, which is relied upon for primary account lookups.
     email                       TEXT        NOT NULL    UNIQUE,
     password_hash               TEXT        NOT NULL,
     symmetric_key_salt          BYTEA       NOT NULL,
