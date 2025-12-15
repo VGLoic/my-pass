@@ -4,6 +4,7 @@ use std::{
 };
 
 use tracing::Level;
+mod argon2instance;
 pub mod newtypes;
 pub mod routes;
 

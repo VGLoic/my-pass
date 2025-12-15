@@ -1,11 +1,13 @@
-use crate::newtypes::{Email, EmailError, Opaque, Password};
+use crate::{
+    argon2instance::argon2_instance,
+    newtypes::{Email, EmailError, Opaque, Password},
+};
 
 use super::{ApiError, AppState};
 use aes_gcm::{
     Aes256Gcm, Key, KeyInit,
     aead::{Aead, Nonce},
 };
-use argon2::Argon2;
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -113,7 +115,7 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
         let symmetric_key_salt_b64 = BASE64_STANDARD.encode(symmetric_key_salt_bytes);
 
         let mut symmetric_key_material = [0u8; 32];
-        Argon2::default()
+        argon2_instance()
             .hash_password_into(
                 password.unsafe_inner().as_bytes(),
                 &symmetric_key_salt_bytes,

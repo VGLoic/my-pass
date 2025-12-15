@@ -1,11 +1,13 @@
 use super::SignUpRequestHttpBody;
-use crate::newtypes::{Email, EmailError, Opaque, Password, PasswordError};
+use crate::{
+    argon2instance::argon2_instance,
+    newtypes::{Email, EmailError, Opaque, Password, PasswordError},
+};
 use aes_gcm::{
     Aes256Gcm, Key, KeyInit,
     aead::{Aead, Nonce},
 };
 use anyhow::anyhow;
-use argon2::Argon2;
 use base64::{Engine, prelude::BASE64_STANDARD};
 use ed25519_dalek::SigningKey;
 use sqlx::prelude::FromRow;
@@ -96,7 +98,7 @@ impl SignupRequest {
         }
         let decoded_symmetric_key_salt: [u8; 16] = slice_to_array(&decoded_symmetric_key_salt);
         let mut symmetric_key_material = [0u8; 32];
-        Argon2::default()
+        argon2_instance()
             .hash_password_into(
                 password.unsafe_inner().as_bytes(),
                 &decoded_symmetric_key_salt,

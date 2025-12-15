@@ -1,11 +1,13 @@
 use anyhow::anyhow;
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::Salt};
+use argon2::{PasswordHash, PasswordHasher, PasswordVerifier, password_hash::Salt};
 use base64::{Engine, prelude::BASE64_STANDARD_NO_PAD};
 use fake::{Dummy, Fake, faker, rand};
 use serde::{Deserialize, Serialize};
 use sqlx::{Database, Decode, Encode, Type};
 use std::fmt::Debug;
 use validator::ValidateEmail;
+
+use crate::argon2instance::argon2_instance;
 
 // #######################################################
 // #################### OPAQUE STRING ####################
@@ -287,7 +289,7 @@ impl Password {
         }
         // Password must be at least 10 characters long, at most 40 characters long
         let char_count = v.chars().count();
-        let password_has_valid_length = char_count >= 10 && char_count <= 40;
+        let password_has_valid_length = (10..=40).contains(&char_count);
         // Password must contain:
         //  - at least two capital letters,
         //  - at least two numbers,
@@ -344,7 +346,7 @@ impl Password {
         let argon_salt = Salt::from_b64(&base64_salt).map_err(|e| {
             anyhow!(e).context("failed to build Salt struct from base64 salt string")
         })?;
-        Argon2::default()
+        argon2_instance()
             .hash_password(self.0.as_bytes(), argon_salt)
             .map_err(|e| anyhow!(e).context("failed to hash password"))
             .map(|v| v.to_string())
@@ -358,7 +360,7 @@ impl Password {
         let password_hash = PasswordHash::new(password_hash).map_err(|e| {
             anyhow!(e).context("failed to build PasswordHash struct from raw string")
         })?;
-        Argon2::default()
+        argon2_instance()
             .verify_password(self.0.as_bytes(), &password_hash)
             .map_err(|e| anyhow!(e).context("failed to verify password"))
     }
