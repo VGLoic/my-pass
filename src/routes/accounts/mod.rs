@@ -128,9 +128,9 @@ async fn sign_up(
 struct SignupRequest {
     email: String,
     password_hash: Opaque<String>,
-    symmetric_key_salt: Opaque<String>,
+    symmetric_key_salt: Opaque<[u8; 16]>,
     encrypted_private_key: Opaque<String>,
-    public_key: Opaque<String>,
+    public_key: Opaque<[u8; 32]>,
 }
 
 #[derive(Debug, Error)]
@@ -187,6 +187,11 @@ impl SignupRequest {
                 "Symmetric key salt must be 16 bytes long".to_string(),
             ));
         }
+        let decoded_symmetric_key_salt: [u8; 16] = {
+            let mut array = [0u8; 16];
+            array.clone_from_slice(&decoded_symmetric_key_salt);
+            array
+        };
         let mut symmetric_key_material = [0u8; 32];
         Argon2::default()
             .hash_password_into(
@@ -254,6 +259,16 @@ impl SignupRequest {
             .map_err(|e| {
                 SignupRequestError::InvalidPublicKeyFormat(format!("Invalid base64 format: {}", e))
             })?;
+        if decoded_public_key.len() != 32 {
+            return Err(SignupRequestError::InvalidPublicKeyFormat(
+                "Public key must be 32 bytes long".to_string(),
+            ));
+        }
+        let decoded_public_key: [u8; 32] = {
+            let mut array = [0u8; 32];
+            array.clone_from_slice(&decoded_public_key);
+            array
+        };
 
         if ed25519_public_key.to_bytes().as_slice() != decoded_public_key.as_slice() {
             return Err(SignupRequestError::InvalidKeyPair);
@@ -266,9 +281,9 @@ impl SignupRequest {
         Ok(SignupRequest {
             email,
             password_hash: password_hash.into(),
-            symmetric_key_salt: BASE64_STANDARD.encode(decoded_symmetric_key_salt).into(),
+            symmetric_key_salt: decoded_symmetric_key_salt.into(),
             encrypted_private_key: BASE64_STANDARD.encode(decoded_encrypted_private_key).into(),
-            public_key: BASE64_STANDARD.encode(decoded_public_key).into(),
+            public_key: decoded_public_key.into(),
         })
     }
 }
@@ -293,12 +308,12 @@ mod tests {
         let derived_signup_request = result.unwrap();
         assert_eq!(derived_signup_request.email, signup_request.email);
         assert_eq!(
-            (derived_signup_request.public_key.unsafe_inner()),
-            signup_request.public_key.unsafe_inner()
+            derived_signup_request.public_key.unsafe_inner(),
+            signup_request.public_key.unsafe_inner().as_bytes()
         );
         assert_eq!(
             derived_signup_request.symmetric_key_salt.unsafe_inner(),
-            signup_request.symmetric_key_salt.unsafe_inner()
+            signup_request.symmetric_key_salt.unsafe_inner().as_bytes()
         );
     }
 
