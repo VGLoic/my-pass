@@ -172,7 +172,7 @@ impl Email {
     /// let email = Email::new_unchecked("user@example.com");
     /// ```
     pub fn new_unchecked(v: &str) -> Self {
-        Self(v.to_owned())
+        Self(v.to_lowercase())
     }
 
     pub fn as_str(&self) -> &str {
