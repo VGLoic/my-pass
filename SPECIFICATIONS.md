@@ -117,8 +117,9 @@ Response:
     - the JWT access token,
     - the encrypted private key,
     - the salt for symmetric key derivation,
+    - the nonce for encrypted private key,
 - The client uses the password and the salt to derive the symmetric key using Argon2id,
-- The client decrypts the private key using the derived symmetric key,
+- The client decrypts the private key using the derived symmetric key and the nonce,
 - The private key and access token are stored in memory for the session.
 
 **Server Side:**
@@ -154,7 +155,8 @@ Response:
 {
   "accessToken": "<jwt_access_token>",
   "encryptedPrivateKey": "<user_encrypted_private_key>",
-  "symmetricKeySalt": "<salt_for_symmetric_key_derivation>"
+  "symmetricKeySalt": "<salt_for_symmetric_key_derivation>",
+  "encryptedPrivateKeyNonce": "<user_encrypted_private_key_nonce>"
 }
 ```
 - On failure: appropriate HTTP error code with message.

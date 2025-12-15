@@ -5,7 +5,7 @@ use crate::newtypes::Email;
 
 /// Defines the AccountsRepository trait for account-related database operations.
 #[async_trait::async_trait]
-pub trait AccountsRepository: Send + Sync {
+pub trait AccountsRepository: Send + Sync + 'static {
     /// Creates a new [Account] in the repository.
     ///
     /// # Arguments
@@ -36,6 +36,7 @@ pub trait AccountsRepository: Send + Sync {
     async fn get_account_by_email(&self, email: &Email) -> Result<Account, GetAccountError>;
 }
 
+#[derive(Clone)]
 pub struct PsqlAccountsRepository {
     pool: Pool<Postgres>,
 }

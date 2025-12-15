@@ -13,7 +13,7 @@ use crate::routes::accounts::repository::AccountsRepository;
 
 pub mod accounts;
 
-pub fn app_router(accounts_repository: impl AccountsRepository + 'static) -> Router {
+pub fn app_router(accounts_repository: impl AccountsRepository) -> Router {
     let app_state = AppState {
         accounts_repository: Arc::new(accounts_repository),
     };
