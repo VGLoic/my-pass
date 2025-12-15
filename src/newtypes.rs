@@ -310,17 +310,22 @@ impl Password {
             }
         }
 
-        if uppercase_count < 2 {
+        // Check all conditions without early return to prevent timing attacks
+        let has_uppercase = uppercase_count >= 2;
+        let has_numbers = number_count >= 2;
+        let has_special = special_count >= 2;
+
+        if !has_uppercase {
             return Err(PasswordError::InvalidPassword(
                 "password must contain at least two uppercase letters".to_string(),
             ));
         }
-        if number_count < 2 {
+        if !has_numbers {
             return Err(PasswordError::InvalidPassword(
                 "password must contain at least two numbers".to_string(),
             ));
         }
-        if special_count < 2 {
+        if !has_special {
             return Err(PasswordError::InvalidPassword(
                 "password must contain at least two special characters".to_string(),
             ));
