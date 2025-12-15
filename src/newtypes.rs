@@ -337,9 +337,6 @@ impl Password {
     }
 
     /// Hash a password using the Argon2id algorithm. The returned string is a argon2-formatted hash.
-    ///
-    /// # Arguments
-    /// * `password` - Password to hash
     pub fn hash(&self) -> Result<String, anyhow::Error> {
         let salt: [u8; 16] = rand::random();
         let base64_salt = BASE64_STANDARD_NO_PAD.encode(salt);
