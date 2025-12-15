@@ -76,6 +76,11 @@ async fn sign_up(
             CreateAccountError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
 
+    app_state
+        .accounts_notifier
+        .account_signed_up(&created_account)
+        .await;
+
     info!("Account created with email: {}", created_account.email);
 
     Ok((

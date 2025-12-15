@@ -9,13 +9,17 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-use crate::domains::accounts::repository::AccountsRepository;
+use crate::domains::accounts::{notifier::AccountsNotifier, repository::AccountsRepository};
 
 pub mod accounts;
 
-pub fn app_router(accounts_repository: impl AccountsRepository) -> Router {
+pub fn app_router(
+    accounts_repository: impl AccountsRepository,
+    accounts_notifier: impl AccountsNotifier,
+) -> Router {
     let app_state = AppState {
         accounts_repository: Arc::new(accounts_repository),
+        accounts_notifier: Arc::new(accounts_notifier),
     };
     Router::new()
         .route("/health", get(get_healthcheck))
@@ -27,6 +31,7 @@ pub fn app_router(accounts_repository: impl AccountsRepository) -> Router {
 #[derive(Clone)]
 pub struct AppState {
     accounts_repository: Arc<dyn AccountsRepository>,
+    accounts_notifier: Arc<dyn AccountsNotifier>,
 }
 
 #[derive(Serialize, Deserialize)]

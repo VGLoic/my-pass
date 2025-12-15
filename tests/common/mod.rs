@@ -1,11 +1,19 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use axum::{
     body::Body,
     extract::MatchedPath,
     http::{Request, Response},
 };
-use my_pass::{Config, routes::app_router};
+use my_pass::{
+    Config,
+    domains::accounts::{Account, notifier::AccountsNotifier},
+    routes::app_router,
+};
 use sqlx::postgres::PgPoolOptions;
 use tower_http::trace::TraceLayer;
 use tracing::{Level, Span, error, info, info_span, level_filters::LevelFilter};
@@ -15,6 +23,7 @@ use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 pub struct InstanceState {
     pub reqwest_client: reqwest::Client,
     pub server_url: String,
+    pub accounts_notifier: FakeAccountsNotifier,
 }
 
 #[allow(dead_code)]
@@ -57,8 +66,9 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
 
     let accounts_repository =
         my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool);
+    let accounts_notifier = FakeAccountsNotifier::new();
 
-    let app = app_router(accounts_repository).layer(
+    let app = app_router(accounts_repository, accounts_notifier.clone()).layer(
         TraceLayer::new_for_http()
             .make_span_with(|request: &Request<_>| {
                 let matched_path = request
@@ -102,6 +112,7 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
     Ok(InstanceState {
         server_url: format!("http://{}:{}", addr.ip(), addr.port()),
         reqwest_client: reqwest::Client::new(),
+        accounts_notifier,
     })
 }
 
@@ -116,4 +127,39 @@ async fn bind_listener_to_free_port() -> Result<tokio::net::TcpListener, anyhow:
     Err(anyhow::anyhow!(
         "No free port found in the range 51000-60000"
     ))
+}
+
+/// Fake accounts notifier for tests
+/// It stores the notifications in memory for later inspection
+/// It implements the `AccountsNotifier` trait
+#[derive(Clone)]
+pub struct FakeAccountsNotifier {
+    pub signed_up_accounts: Arc<Mutex<Vec<Account>>>,
+}
+
+impl FakeAccountsNotifier {
+    pub fn new() -> Self {
+        Self {
+            signed_up_accounts: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn has_account_signed_up(&self, email: &str, count: usize) -> bool {
+        let lowercase_email = email.to_lowercase();
+        let accounts = self.signed_up_accounts.lock().unwrap();
+        accounts
+            .iter()
+            .filter(|account| account.email.to_string() == lowercase_email)
+            .count()
+            == count
+    }
+}
+
+#[async_trait::async_trait]
+impl AccountsNotifier for FakeAccountsNotifier {
+    async fn account_signed_up(&self, account: &Account) {
+        let mut accounts = self.signed_up_accounts.lock().unwrap();
+        accounts.push(account.clone());
+    }
 }
