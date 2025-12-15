@@ -4,6 +4,8 @@ use std::{
 };
 
 use tracing::Level;
+mod argon2instance;
+pub mod newtypes;
 pub mod routes;
 
 // ############################################
@@ -17,7 +19,7 @@ pub struct Config {
     pub log_level: Level,
     /// Database connection URL
     /// Format: `postgresql://<Postgres user>:<Postgres password>@<Postgres host>:<Postgres port>/<Postgres DB>`
-    pub database_url: String,
+    pub database_url: newtypes::Opaque<String>,
 }
 
 impl Config {
@@ -41,10 +43,10 @@ impl Config {
         };
 
         let database_url = match parse_required_env_variable::<String>("DATABASE_URL") {
-            Ok(v) => v,
+            Ok(v) => newtypes::Opaque::new(v),
             Err(e) => {
                 errors.push(e);
-                String::new()
+                newtypes::Opaque::new(String::new())
             }
         };
 

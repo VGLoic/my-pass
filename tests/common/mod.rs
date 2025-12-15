@@ -13,6 +13,7 @@ use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[allow(dead_code)]
 pub struct InstanceState {
+    pub reqwest_client: reqwest::Client,
     pub server_url: String,
 }
 
@@ -21,7 +22,9 @@ pub fn default_test_config() -> Config {
     Config {
         port: 0,
         log_level: Level::WARN,
-        database_url: "postgresql://admin:admin@localhost:5433/mypass".to_string(),
+        database_url: "postgresql://admin:admin@localhost:5433/mypass"
+            .to_string()
+            .into(),
     }
 }
 
@@ -35,7 +38,7 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
     let pool = match PgPoolOptions::new()
         .max_connections(5)
         .acquire_timeout(Duration::from_secs(5))
-        .connect(&config.database_url)
+        .connect(config.database_url.unsafe_inner())
         .await
     {
         Ok(c) => c,
@@ -52,7 +55,10 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
         return Err(anyhow::anyhow!(err));
     };
 
-    let app = app_router().layer(
+    let accounts_repository =
+        my_pass::routes::accounts::repository::PsqlAccountsRepository::new(pool);
+
+    let app = app_router(accounts_repository).layer(
         TraceLayer::new_for_http()
             .make_span_with(|request: &Request<_>| {
                 let matched_path = request
@@ -95,6 +101,7 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
 
     Ok(InstanceState {
         server_url: format!("http://{}:{}", addr.ip(), addr.port()),
+        reqwest_client: reqwest::Client::new(),
     })
 }
 

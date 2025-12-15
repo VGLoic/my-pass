@@ -51,7 +51,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let pool = match PgPoolOptions::new()
         .max_connections(5)
         .acquire_timeout(Duration::from_secs(5))
-        .connect(&config.database_url)
+        .connect(config.database_url.unsafe_inner())
         .await
     {
         Ok(c) => c,
@@ -70,9 +70,12 @@ async fn main() -> Result<(), anyhow::Error> {
 
     info!("Successfully ran migrations");
 
+    let accounts_repository =
+        my_pass::routes::accounts::repository::PsqlAccountsRepository::new(pool);
+
     let x_request_id = HeaderName::from_static(REQUEST_ID_HEADER);
 
-    let app = app_router().layer((
+    let app = app_router(accounts_repository).layer((
         // Set `x-request-id` header for every request
         SetRequestIdLayer::new(x_request_id.clone(), MakeRequestUuid),
         // Log request and response
