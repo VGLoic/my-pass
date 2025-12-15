@@ -90,10 +90,11 @@ pub struct SignUpRequestHttpBody {
     pub password: Opaque<String>,
     /// Salt used for deriving the symmetric key from the password, must be base64 encoded
     pub symmetric_key_salt: Opaque<String>,
-    /// Encrypted Ed25519 private key of the user using AES-256-GCM with a key derived from the password and symmetric_key_salt, must be base64 encoded
-    pub encrypted_private_key: Opaque<String>,
     /// Nonce used for the encryption of the private key, must be 12 bytes encoded in base64
     pub encrypted_private_key_nonce: Opaque<String>,
+    /// Encrypted Ed25519 private key of the user using AES-256-GCM with a key derived from the password and symmetric_key_salt, the used nonce is `encryptedPrivateKeyNonce`.
+    /// It must be base64 encoded
+    pub encrypted_private_key: Opaque<String>,
     /// Public key of the user, must be base64 encoded
     pub public_key: Opaque<String>,
 }
@@ -148,6 +149,7 @@ struct AccountResponse {
     pub id: uuid::Uuid,
     pub email: String,
     pub symmetric_key_salt: Opaque<String>,
+    pub encrypted_private_key_nonce: Opaque<String>,
     pub encrypted_private_key: Opaque<String>,
     pub public_key: Opaque<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -161,6 +163,9 @@ impl From<Account> for AccountResponse {
             email: account.email,
             symmetric_key_salt: BASE64_STANDARD
                 .encode(account.symmetric_key_salt.unsafe_inner())
+                .into(),
+            encrypted_private_key_nonce: BASE64_STANDARD
+                .encode(account.encrypted_private_key_nonce.unsafe_inner())
                 .into(),
             encrypted_private_key: account.encrypted_private_key,
             public_key: BASE64_STANDARD

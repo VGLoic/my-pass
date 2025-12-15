@@ -23,6 +23,7 @@ pub struct Account {
     #[allow(dead_code)]
     pub password_hash: Opaque<String>,
     pub symmetric_key_salt: Opaque<[u8; 16]>,
+    pub encrypted_private_key_nonce: Opaque<[u8; 12]>,
     pub encrypted_private_key: Opaque<String>,
     pub public_key: Opaque<[u8; 32]>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -37,6 +38,7 @@ pub struct SignupRequest {
     pub email: String,
     pub password_hash: Opaque<String>,
     pub symmetric_key_salt: Opaque<[u8; 16]>,
+    pub encrypted_private_key_nonce: Opaque<[u8; 12]>,
     pub encrypted_private_key: Opaque<String>,
     pub public_key: Opaque<[u8; 32]>,
 }
@@ -125,7 +127,12 @@ impl SignupRequest {
                 "Encrypted private key nonce must be 12 bytes long".to_string(),
             ));
         }
-        let decoded_encrypted_private_key_nonce =
+        let decoded_encrypted_private_key_nonce: [u8; 12] = {
+            let mut array = [0u8; 12];
+            array.clone_from_slice(&decoded_encrypted_private_key_nonce);
+            array
+        };
+        let decoded_encrypted_private_key_nonce_aes_formatted =
             Nonce::<Aes256Gcm>::from_slice(&decoded_encrypted_private_key_nonce);
 
         let decoded_encrypted_private_key = BASE64_STANDARD
@@ -139,7 +146,7 @@ impl SignupRequest {
 
         let decrypted_private_key = cipher
             .decrypt(
-                decoded_encrypted_private_key_nonce,
+                decoded_encrypted_private_key_nonce_aes_formatted,
                 decoded_encrypted_private_key.as_ref(),
             )
             .map_err(|e| {
@@ -190,6 +197,7 @@ impl SignupRequest {
             email,
             password_hash: password_hash.into(),
             symmetric_key_salt: decoded_symmetric_key_salt.into(),
+            encrypted_private_key_nonce: decoded_encrypted_private_key_nonce.into(),
             encrypted_private_key: BASE64_STANDARD.encode(decoded_encrypted_private_key).into(),
             public_key: decoded_public_key.into(),
         })
@@ -242,6 +250,27 @@ mod tests {
                 .decode(http_signup_request.symmetric_key_salt.unsafe_inner())
                 .unwrap()
                 .as_slice()
+        );
+        assert_eq!(
+            signup_request.encrypted_private_key_nonce.unsafe_inner(),
+            BASE64_STANDARD
+                .decode(
+                    http_signup_request
+                        .encrypted_private_key_nonce
+                        .unsafe_inner()
+                )
+                .unwrap()
+                .as_slice()
+        );
+        assert_eq!(
+            signup_request.encrypted_private_key.unsafe_inner(),
+            http_signup_request.encrypted_private_key.unsafe_inner()
+        );
+        let password = Password::new(http_signup_request.password.unsafe_inner()).unwrap();
+        assert!(
+            password
+                .verify(signup_request.password_hash.unsafe_inner())
+                .is_ok()
         );
     }
 

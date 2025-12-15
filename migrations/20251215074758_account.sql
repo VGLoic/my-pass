@@ -3,14 +3,15 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "moddatetime";
 
 CREATE TABLE "account" (
-    id                    UUID        NOT NULL    PRIMARY KEY DEFAULT uuid_generate_v4 (),
-    email                 TEXT        NOT NULL    UNIQUE,
-    password_hash         TEXT        NOT NULL,
-    symmetric_key_salt    BYTEA       NOT NULL,
-    encrypted_private_key TEXT        NOT NULL,
-    public_key            BYTEA       NOT NULL,
-    created_at            TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP,
-    updated_at            TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP
+    id                          UUID        NOT NULL    PRIMARY KEY DEFAULT uuid_generate_v4 (),
+    email                       TEXT        NOT NULL    UNIQUE,
+    password_hash               TEXT        NOT NULL,
+    symmetric_key_salt          BYTEA       NOT NULL,
+    encrypted_private_key_nonce BYTEA       NOT NULL,
+    encrypted_private_key       TEXT        NOT NULL,
+    public_key                  BYTEA       NOT NULL,
+    created_at                  TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP,
+    updated_at                  TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP
 );
 
 

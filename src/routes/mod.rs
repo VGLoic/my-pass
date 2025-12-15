@@ -19,7 +19,7 @@ pub fn app_router(accounts_repository: impl AccountsRepository + 'static) -> Rou
     };
     Router::new()
         .route("/health", get(get_healthcheck))
-        .nest("/accounts", accounts::accounts_router())
+        .nest("/api/accounts", accounts::accounts_router())
         .fallback(not_found)
         .with_state(app_state)
 }

@@ -58,14 +58,16 @@ impl AccountsRepository for PsqlAccountsRepository {
                 email,
                 password_hash,
                 symmetric_key_salt,
+                encrypted_private_key_nonce,
                 encrypted_private_key,
                 public_key
-            ) VALUES ($1, $2, $3, $4, $5)
+            ) VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING
                 id,
                 email,
                 password_hash,
                 symmetric_key_salt,
+                encrypted_private_key_nonce,
                 encrypted_private_key,
                 public_key,
                 created_at,
@@ -75,6 +77,7 @@ impl AccountsRepository for PsqlAccountsRepository {
         .bind(&signup_request.email)
         .bind(&signup_request.password_hash)
         .bind(&signup_request.symmetric_key_salt)
+        .bind(&signup_request.encrypted_private_key_nonce)
         .bind(&signup_request.encrypted_private_key)
         .bind(&signup_request.public_key)
         .fetch_one(&self.pool)
@@ -103,6 +106,7 @@ impl AccountsRepository for PsqlAccountsRepository {
                 email,
                 password_hash,
                 symmetric_key_salt,
+                encrypted_private_key_nonce,
                 encrypted_private_key,
                 public_key,
                 created_at,
