@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     Json, Router,
     http::StatusCode,
@@ -7,15 +9,24 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-mod accounts;
+use crate::routes::accounts::repository::AccountsRepository;
 
-pub use accounts::SignUpRequestHttpBody;
+pub mod accounts;
 
-pub fn app_router() -> Router {
+pub fn app_router(accounts_repository: impl AccountsRepository + 'static) -> Router {
+    let app_state = AppState {
+        accounts_repository: Arc::new(accounts_repository),
+    };
     Router::new()
         .route("/health", get(get_healthcheck))
         .nest("/accounts", accounts::accounts_router())
         .fallback(not_found)
+        .with_state(app_state)
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    accounts_repository: Arc<dyn AccountsRepository>,
 }
 
 #[derive(Serialize, Deserialize)]

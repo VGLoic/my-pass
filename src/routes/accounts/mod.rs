@@ -1,6 +1,6 @@
 use crate::newtypes::{self, Email, EmailError, Opaque, Password, PasswordError};
 
-use super::ApiError;
+use super::{ApiError, AppState};
 use aes_gcm::{
     Aes256Gcm, Key, KeyInit,
     aead::{Aead, Nonce},
@@ -9,7 +9,7 @@ use anyhow::anyhow;
 use argon2::Argon2;
 use axum::{
     Json, Router,
-    extract::Path,
+    extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -17,12 +17,13 @@ use base64::{Engine, prelude::BASE64_STANDARD};
 use ed25519_dalek::SigningKey;
 use fake::{Dummy, Fake, Faker};
 use serde::{Deserialize, Serialize};
+use sqlx::prelude::FromRow;
 use thiserror::Error;
 use tracing::warn;
 
-mod repository;
+pub mod repository;
 
-pub fn accounts_router() -> Router {
+pub fn accounts_router() -> Router<AppState> {
     Router::new()
         .route("/signup", post(sign_up))
         // Added a test route for checking user existence
@@ -33,16 +34,16 @@ pub fn accounts_router() -> Router {
 // ############### ACCOUNT DEFINITION ###############
 // ##################################################
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, FromRow)]
 pub struct Account {
-    pub id: uuid::Uuid,
-    pub email: String,
-    pub password_hash: Opaque<String>,
-    pub symmetric_key_salt: Opaque<[u8; 16]>,
-    pub encrypted_private_key: Opaque<String>,
-    pub public_key: Opaque<[u8; 32]>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
+    id: uuid::Uuid,
+    email: String,
+    password_hash: Opaque<String>,
+    symmetric_key_salt: Opaque<[u8; 16]>,
+    encrypted_private_key: Opaque<String>,
+    public_key: Opaque<[u8; 32]>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 // #######################################
@@ -112,8 +113,9 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
 }
 
 async fn sign_up(
+    State(app_state): State<AppState>,
     Json(body): Json<SignUpRequestHttpBody>,
-) -> Result<(StatusCode, &'static str), ApiError> {
+) -> Result<(StatusCode, Json<AccountResponse>), ApiError> {
     let _signup_request = SignupRequest::try_from_http_body(body).map_err(|e| match e {
         SignupRequestError::InvalidEmailFormat(msg) => {
             ApiError::BadRequest(format!("invalid email format: {msg}"))
@@ -138,11 +140,26 @@ async fn sign_up(
         }
         SignupRequestError::Unknown(e) => ApiError::InternalServerError(e),
     })?;
-    Ok((StatusCode::CREATED, "Account created"))
+
+    let created_account = app_state
+        .accounts_repository
+        .create_account(&_signup_request)
+        .await
+        .map_err(|e| match e {
+            CreateAccountError::EmailAlreadyCreated => {
+                ApiError::BadRequest("an account with the given email already exists".to_string())
+            }
+            CreateAccountError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AccountResponse::from(created_account)),
+    ))
 }
 
 #[allow(dead_code)]
-struct SignupRequest {
+pub struct SignupRequest {
     email: String,
     password_hash: Opaque<String>,
     symmetric_key_salt: Opaque<[u8; 16]>,
@@ -311,6 +328,35 @@ pub enum CreateAccountError {
     EmailAlreadyCreated,
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AccountResponse {
+    pub id: uuid::Uuid,
+    pub email: String,
+    pub symmetric_key_salt: Opaque<String>,
+    pub encrypted_private_key: Opaque<String>,
+    pub public_key: Opaque<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<Account> for AccountResponse {
+    fn from(account: Account) -> Self {
+        AccountResponse {
+            id: account.id,
+            email: account.email,
+            symmetric_key_salt: BASE64_STANDARD
+                .encode(account.symmetric_key_salt.unsafe_inner())
+                .into(),
+            encrypted_private_key: account.encrypted_private_key,
+            public_key: BASE64_STANDARD
+                .encode(account.public_key.unsafe_inner())
+                .into(),
+            created_at: account.created_at,
+            updated_at: account.updated_at,
+        }
+    }
 }
 
 // ##############################################################

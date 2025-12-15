@@ -3,7 +3,7 @@ use fake::{Fake, Faker};
 
 mod common;
 use common::{default_test_config, setup_instance};
-use my_pass::routes::SignUpRequestHttpBody;
+use my_pass::routes::accounts::SignUpRequestHttpBody;
 
 #[tokio::test]
 async fn test_signup() {

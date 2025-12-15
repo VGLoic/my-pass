@@ -55,7 +55,10 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
         return Err(anyhow::anyhow!(err));
     };
 
-    let app = app_router().layer(
+    let accounts_repository =
+        my_pass::routes::accounts::repository::PsqlAccountsRepository::new(pool);
+
+    let app = app_router(accounts_repository).layer(
         TraceLayer::new_for_http()
             .make_span_with(|request: &Request<_>| {
                 let matched_path = request

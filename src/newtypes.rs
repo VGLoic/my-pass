@@ -3,7 +3,7 @@ use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_ha
 use base64::{Engine, prelude::BASE64_STANDARD_NO_PAD};
 use fake::{Dummy, Fake, faker, rand};
 use serde::{Deserialize, Serialize};
-use sqlx::{Database, Decode, Encode};
+use sqlx::{Database, Decode, Encode, Type};
 use std::fmt::Debug;
 use validator::ValidateEmail;
 
@@ -56,6 +56,54 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "*********")
+    }
+}
+
+impl<DB, T> Type<DB> for Opaque<T>
+where
+    DB: Database,
+    String: Type<DB>,
+    T: Clone + Serialize + Type<DB>,
+{
+    fn type_info() -> DB::TypeInfo {
+        T::type_info()
+    }
+}
+
+impl<'q, DB, T> Encode<'q, DB> for Opaque<T>
+where
+    DB: Database,
+    String: Encode<'q, DB>,
+    T: Clone + Serialize + Encode<'q, DB>,
+{
+    // Required method
+    fn encode_by_ref(
+        &self,
+        buf: &mut <DB as Database>::ArgumentBuffer<'q>,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        <T as Encode<'q, DB>>::encode_by_ref(self.unsafe_inner(), buf)
+    }
+}
+
+impl<'r, DB: Database, T> Decode<'r, DB> for Opaque<T>
+where
+    // we want to delegate some of the work to string decoding so let's make sure strings
+    // are supported by the database
+    &'r str: Decode<'r, DB>,
+    T: Clone + Serialize + Decode<'r, DB>,
+{
+    fn decode(
+        value: <DB as Database>::ValueRef<'r>,
+    ) -> Result<Opaque<T>, Box<dyn std::error::Error + 'static + Send + Sync>> {
+        // the interface of ValueRef is largely unstable at the moment
+        // so this is not directly implementable
+
+        // however, you can delegate to a type that matches the format of the type you want
+        // to decode (such as a UTF-8 string)
+
+        let value = <T as Decode<DB>>::decode(value)?;
+
+        Ok(Opaque(value))
     }
 }
 
