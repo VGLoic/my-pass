@@ -160,7 +160,7 @@ impl From<Account> for AccountResponse {
     fn from(account: Account) -> Self {
         AccountResponse {
             id: account.id,
-            email: account.email,
+            email: account.email.to_string(),
             symmetric_key_salt: BASE64_STANDARD
                 .encode(account.symmetric_key_salt.unsafe_inner())
                 .into(),

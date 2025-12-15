@@ -19,7 +19,7 @@ use tracing::warn;
 #[derive(Debug, Clone, FromRow)]
 pub struct Account {
     pub id: uuid::Uuid,
-    pub email: String,
+    pub email: Email,
     #[allow(dead_code)]
     pub password_hash: Opaque<String>,
     pub symmetric_key_salt: Opaque<[u8; 16]>,
@@ -35,7 +35,7 @@ pub struct Account {
 // #######################################
 
 pub struct SignupRequest {
-    pub email: String,
+    pub email: Email,
     pub password_hash: Opaque<String>,
     pub symmetric_key_salt: Opaque<[u8; 16]>,
     pub encrypted_private_key_nonce: Opaque<[u8; 12]>,
@@ -65,16 +65,14 @@ pub enum SignupRequestError {
 
 impl SignupRequest {
     pub fn try_from_http_body(body: SignUpRequestHttpBody) -> Result<Self, SignupRequestError> {
-        let email = Email::new(&body.email)
-            .map_err(|e| match e {
-                EmailError::Empty => {
-                    SignupRequestError::InvalidEmailFormat("Email cannot be empty".to_string())
-                }
-                EmailError::InvalidFormat => {
-                    SignupRequestError::InvalidEmailFormat("Email format is invalid".to_string())
-                }
-            })?
-            .to_string();
+        let email = Email::new(&body.email).map_err(|e| match e {
+            EmailError::Empty => {
+                SignupRequestError::InvalidEmailFormat("Email cannot be empty".to_string())
+            }
+            EmailError::InvalidFormat => {
+                SignupRequestError::InvalidEmailFormat("Email format is invalid".to_string())
+            }
+        })?;
         let password = Password::new(body.password.unsafe_inner()).map_err(|e| match e {
             PasswordError::Empty => {
                 SignupRequestError::InvalidPasswordFormat("Password cannot be empty".to_string())
@@ -228,7 +226,10 @@ mod tests {
         let result = SignupRequest::try_from_http_body(http_signup_request.clone());
         assert!(result.is_ok());
         let signup_request = result.unwrap();
-        assert_eq!(signup_request.email, signup_request.email);
+        assert_eq!(
+            signup_request.email.as_str(),
+            http_signup_request.email.as_str()
+        );
         assert_eq!(
             signup_request.public_key.unsafe_inner(),
             BASE64_STANDARD

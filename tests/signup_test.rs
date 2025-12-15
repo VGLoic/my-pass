@@ -13,7 +13,10 @@ async fn test_signup() {
 
     let response = instance_state
         .reqwest_client
-        .post(format!("{}/accounts/signup", &instance_state.server_url))
+        .post(format!(
+            "{}/api/accounts/signup",
+            &instance_state.server_url
+        ))
         .json(&signup_body)
         .send()
         .await
@@ -24,7 +27,7 @@ async fn test_signup() {
         instance_state
             .reqwest_client
             .get(format!(
-                "{}/accounts/{}/test-exists",
+                "{}/api/accounts/{}/test-exists",
                 &instance_state.server_url, signup_body.email
             ))
             .send()
@@ -41,17 +44,28 @@ async fn test_successive_signup() {
 
     let signup_body = Faker.fake::<SignUpRequestHttpBody>();
 
-    let _ = instance_state
-        .reqwest_client
-        .post(format!("{}/accounts/signup", &instance_state.server_url))
-        .json(&signup_body)
-        .send()
-        .await;
+    assert_eq!(
+        instance_state
+            .reqwest_client
+            .post(format!(
+                "{}/api/accounts/signup",
+                &instance_state.server_url
+            ))
+            .json(&signup_body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CREATED
+    );
 
     assert_eq!(
         instance_state
             .reqwest_client
-            .post(format!("{}/accounts/signup", &instance_state.server_url))
+            .post(format!(
+                "{}/api/accounts/signup",
+                &instance_state.server_url
+            ))
             .json(&signup_body)
             .send()
             .await
