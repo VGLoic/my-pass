@@ -97,11 +97,7 @@ impl SignupRequest {
                 "Symmetric key salt must be 16 bytes long".to_string(),
             ));
         }
-        let decoded_symmetric_key_salt: [u8; 16] = {
-            let mut array = [0u8; 16];
-            array.clone_from_slice(&decoded_symmetric_key_salt);
-            array
-        };
+        let decoded_symmetric_key_salt: [u8; 16] = slice_to_array(&decoded_symmetric_key_salt);
         let mut symmetric_key_material = [0u8; 32];
         Argon2::default()
             .hash_password_into(
@@ -127,11 +123,8 @@ impl SignupRequest {
                 "Encrypted private key nonce must be 12 bytes long".to_string(),
             ));
         }
-        let decoded_encrypted_private_key_nonce: [u8; 12] = {
-            let mut array = [0u8; 12];
-            array.clone_from_slice(&decoded_encrypted_private_key_nonce);
-            array
-        };
+        let decoded_encrypted_private_key_nonce: [u8; 12] =
+            slice_to_array(&decoded_encrypted_private_key_nonce);
         let decoded_encrypted_private_key_nonce_aes_formatted =
             Nonce::<Aes256Gcm>::from_slice(&decoded_encrypted_private_key_nonce);
 
@@ -161,10 +154,7 @@ impl SignupRequest {
             );
             return Err(SignupRequestError::InvalidKeyPair);
         }
-        let decrypted_private_key: [u8; 32] = decrypted_private_key
-            .as_slice()
-            .try_into()
-            .map_err(|_| SignupRequestError::InvalidKeyPair)?;
+        let decrypted_private_key: [u8; 32] = slice_to_array(&decrypted_private_key);
 
         let ed25519_secret_key = SigningKey::from_bytes(&decrypted_private_key);
         let ed25519_public_key = ed25519_secret_key.verifying_key();
@@ -179,11 +169,7 @@ impl SignupRequest {
                 "Public key must be 32 bytes long".to_string(),
             ));
         }
-        let decoded_public_key: [u8; 32] = {
-            let mut array = [0u8; 32];
-            array.clone_from_slice(&decoded_public_key);
-            array
-        };
+        let decoded_public_key: [u8; 32] = slice_to_array(&decoded_public_key);
 
         if ed25519_public_key.to_bytes().as_slice() != decoded_public_key.as_slice() {
             return Err(SignupRequestError::InvalidKeyPair);
@@ -202,6 +188,12 @@ impl SignupRequest {
             public_key: decoded_public_key.into(),
         })
     }
+}
+
+fn slice_to_array<const N: usize>(slice: &[u8]) -> [u8; N] {
+    let mut array = [0u8; N];
+    array.copy_from_slice(slice);
+    array
 }
 
 #[derive(Debug, Error)]
