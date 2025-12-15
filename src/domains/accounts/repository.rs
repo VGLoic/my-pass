@@ -1,6 +1,6 @@
 use sqlx::{Pool, Postgres, query_as};
 
-use super::domain::{Account, CreateAccountError, GetAccountError, SignupRequest};
+use super::{Account, CreateAccountError, GetAccountError, SignupRequest};
 use crate::newtypes::Email;
 
 /// Defines the AccountsRepository trait for account-related database operations.

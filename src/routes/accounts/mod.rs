@@ -20,9 +20,9 @@ use ed25519_dalek::SigningKey;
 use fake::{Dummy, Fake, Faker};
 use serde::{Deserialize, Serialize};
 
-pub mod domain;
-pub mod repository;
-use domain::{Account, CreateAccountError, GetAccountError, SignupRequest, SignupRequestError};
+use crate::domains::accounts::{
+    Account, CreateAccountError, GetAccountError, SignupRequest, SignupRequestError,
+};
 use tracing::info;
 
 pub fn accounts_router() -> Router<AppState> {

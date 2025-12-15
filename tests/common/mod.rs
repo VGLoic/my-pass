@@ -56,7 +56,7 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
     };
 
     let accounts_repository =
-        my_pass::routes::accounts::repository::PsqlAccountsRepository::new(pool);
+        my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool);
 
     let app = app_router(accounts_repository).layer(
         TraceLayer::new_for_http()

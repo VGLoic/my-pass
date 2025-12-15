@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-use crate::routes::accounts::repository::AccountsRepository;
+use crate::domains::accounts::repository::AccountsRepository;
 
 pub mod accounts;
 

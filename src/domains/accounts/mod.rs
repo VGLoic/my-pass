@@ -2,6 +2,8 @@ use crate::newtypes::{Email, Opaque};
 use sqlx::prelude::FromRow;
 use thiserror::Error;
 
+pub mod repository;
+
 // ##################################################
 // ############### ACCOUNT DEFINITION ###############
 // ##################################################
