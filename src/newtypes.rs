@@ -11,6 +11,9 @@ use validator::ValidateEmail;
 // #################### OPAQUE STRING ####################
 // #######################################################
 
+/// This type is meant to be used to wrap sensitive strings.
+/// It will prevent accidental logging or displaying of the inner value.
+/// The inner value can still be accessed via the `unsafe_inner` method.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Opaque<T>(T)

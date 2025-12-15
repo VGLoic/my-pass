@@ -158,7 +158,6 @@ async fn sign_up(
     ))
 }
 
-#[allow(dead_code)]
 pub struct SignupRequest {
     email: String,
     password_hash: Opaque<String>,
