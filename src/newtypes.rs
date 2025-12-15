@@ -286,12 +286,7 @@ impl Password {
             return Err(PasswordError::Empty);
         }
         // Password must be at least 10 characters long, at most 40 characters long
-        if v.len() < 10 || v.len() > 40 {
-            return Err(PasswordError::InvalidPassword(
-                "password length must be at least 10 characters and at most 40 characters"
-                    .to_string(),
-            ));
-        }
+        let password_has_valid_length = v.len() >= 10 && v.len() <= 40;
         // Password must contain:
         //  - at least two capital letters,
         //  - at least two numbers,
@@ -314,6 +309,13 @@ impl Password {
         let has_uppercase = uppercase_count >= 2;
         let has_numbers = number_count >= 2;
         let has_special = special_count >= 2;
+
+        if !password_has_valid_length {
+            return Err(PasswordError::InvalidPassword(
+                "password length must be at least 10 characters and at most 40 characters"
+                    .to_string(),
+            ));
+        }
 
         if !has_uppercase {
             return Err(PasswordError::InvalidPassword(
@@ -385,9 +387,13 @@ impl Debug for Password {
 
 impl<T> Dummy<T> for Password {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &T, rng: &mut R) -> Self {
-        let mut password: String = faker::internet::en::Password(10..36).fake_with_rng(rng);
-        password += "{&";
-        password += "24";
+        let mut password: String = faker::internet::en::Password(10..40).fake_with_rng(rng);
+
+        // Ensure the password meets the criteria by replacing the first few characters
+        password.replace_range(0..2, "AB"); // at least two uppercase letters
+        password.replace_range(2..4, "12"); // at least two numbers
+        password.replace_range(4..6, "!@"); // at least two special characters
+
         Password(password)
     }
 }
