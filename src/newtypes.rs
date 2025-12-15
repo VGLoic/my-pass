@@ -352,7 +352,6 @@ impl Password {
     /// Verify a password validity against an Argon2id formatted key
     ///
     /// # Arguments
-    /// * `password` - Password to hash
     /// * `password_hash` - Argon2id formatted hash to verify against
     pub fn verify(&self, password_hash: &str) -> Result<(), anyhow::Error> {
         let password_hash = PasswordHash::new(password_hash).map_err(|e| {
