@@ -35,3 +35,29 @@ async fn test_signup() {
     //     StatusCode::OK
     // )
 }
+
+#[tokio::test]
+async fn test_successive_signup() {
+    let instance_state = setup_instance(default_test_config()).await.unwrap();
+
+    let signup_body = Faker.fake::<SignUpRequestHttpBody>();
+
+    let _ = instance_state
+        .reqwest_client
+        .post(format!("{}/accounts/signup", &instance_state.server_url))
+        .json(&signup_body)
+        .send()
+        .await;
+
+    assert_eq!(
+        instance_state
+            .reqwest_client
+            .post(format!("{}/accounts/signup", &instance_state.server_url))
+            .json(&signup_body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+}
