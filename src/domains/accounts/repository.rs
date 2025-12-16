@@ -271,6 +271,14 @@ impl AccountsRepository for PsqlAccountsRepository {
                         .map_err(|e| anyhow::Error::new(e).context("parsing account updated_at"))?,
                 };
 
+                let verification_ticket_exists: Option<uuid::Uuid> =
+                    row.try_get(10).map_err(|e| {
+                        anyhow::Error::new(e).context("checking verification ticket existence")
+                    })?;
+                if verification_ticket_exists.is_none() {
+                    return Err(FindLastVerificationTicketError::NoVerificationTicket);
+                }
+
                 let ticket = VerificationTicket {
                     id: row
                         .try_get(10)
