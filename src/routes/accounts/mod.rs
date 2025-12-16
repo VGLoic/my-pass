@@ -15,19 +15,25 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
-use base64::{Engine, prelude::BASE64_STANDARD};
+use base64::{
+    Engine,
+    prelude::{BASE64_STANDARD, BASE64_URL_SAFE},
+};
 use ed25519_dalek::SigningKey;
-use fake::{Dummy, Fake, Faker};
+use fake::{Dummy, Fake, Faker, rand};
 use serde::{Deserialize, Serialize};
 
 use crate::domains::accounts::{
-    Account, CreateAccountError, GetAccountError, SignupRequest, SignupRequestError,
+    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, SignupRequest,
+    SignupRequestError, UseVerificationTicketError, UseVerificationTicketRequest,
+    UseVerificationTicketRequestError, VerificationTicket,
 };
 use tracing::info;
 
 pub fn accounts_router() -> Router<AppState> {
     Router::new()
         .route("/signup", post(sign_up))
+        .route("/verification-tickets/use", post(use_verification_ticket))
         // Added a test route for checking user existence
         .route("/{email}/test-exists", get(test_user_exists))
 }
@@ -65,7 +71,7 @@ async fn sign_up(
         SignupRequestError::Unknown(e) => ApiError::InternalServerError(e),
     })?;
 
-    let created_account = app_state
+    let (created_account, created_ticket) = app_state
         .accounts_repository
         .create_account(&signup_request)
         .await
@@ -78,7 +84,7 @@ async fn sign_up(
 
     app_state
         .accounts_notifier
-        .account_signed_up(&created_account)
+        .account_signed_up(&created_account, &created_ticket)
         .await;
 
     info!("Account created with email: {}", created_account.email);
@@ -140,17 +146,6 @@ impl SignUpRequestHttpBody {
             ));
         }
         let decoded_symmetric_key_salt: [u8; 16] = slice_to_array(&decoded_symmetric_key_salt);
-        let mut symmetric_key_material = [0u8; 32];
-        argon2_instance()
-            .hash_password_into(
-                password.unsafe_inner().as_bytes(),
-                &decoded_symmetric_key_salt,
-                &mut symmetric_key_material,
-            )
-            .map_err(|e| anyhow!("{e}").context("Failed to generate symmetric key material"))?;
-
-        let aes_gcm_key = Key::<Aes256Gcm>::from_slice(&symmetric_key_material);
-        let cipher = Aes256Gcm::new(aes_gcm_key);
 
         let decoded_encrypted_private_key_nonce = BASE64_STANDARD
             .decode(self.encrypted_private_key_nonce.unsafe_inner())
@@ -167,8 +162,6 @@ impl SignUpRequestHttpBody {
         }
         let decoded_encrypted_private_key_nonce: [u8; 12] =
             slice_to_array(&decoded_encrypted_private_key_nonce);
-        let decoded_encrypted_private_key_nonce_aes_formatted =
-            Nonce::<Aes256Gcm>::from_slice(&decoded_encrypted_private_key_nonce);
 
         let decoded_encrypted_private_key = BASE64_STANDARD
             .decode(self.encrypted_private_key.unsafe_inner())
@@ -178,21 +171,6 @@ impl SignUpRequestHttpBody {
                     e
                 ))
             })?;
-
-        let decrypted_private_key = cipher
-            .decrypt(
-                decoded_encrypted_private_key_nonce_aes_formatted,
-                decoded_encrypted_private_key.as_ref(),
-            )
-            .map_err(|_| SignupRequestError::InvalidKeyPair)?;
-
-        if decrypted_private_key.len() != 32 {
-            return Err(SignupRequestError::InvalidKeyPair);
-        }
-        let decrypted_private_key: [u8; 32] = slice_to_array(&decrypted_private_key);
-
-        let ed25519_secret_key = SigningKey::from_bytes(&decrypted_private_key);
-        let ed25519_public_key = ed25519_secret_key.verifying_key();
 
         let decoded_public_key = BASE64_STANDARD
             .decode(self.public_key.unsafe_inner())
@@ -206,13 +184,26 @@ impl SignUpRequestHttpBody {
         }
         let decoded_public_key: [u8; 32] = slice_to_array(&decoded_public_key);
 
-        if ed25519_public_key.to_bytes().as_slice() != decoded_public_key.as_slice() {
+        if verify_key_material(
+            &password,
+            &decoded_symmetric_key_salt,
+            &decoded_encrypted_private_key_nonce,
+            &decoded_encrypted_private_key,
+            &decoded_public_key,
+        )
+        .is_err()
+        {
             return Err(SignupRequestError::InvalidKeyPair);
         }
 
+        // Verification token is a base64url-encoded random 32-byte value
+        let verification_ticket_token: [u8; 32] = rand::random();
+
+        let verification_ticket_lifetime = chrono::Duration::minutes(15);
+
         let password_hash = password
             .hash()
-            .map_err(|e| anyhow!("{e}").context("Failed to hash password"))?;
+            .map_err(|e| e.context("Failed to hash password"))?;
 
         Ok(SignupRequest::new(
             email,
@@ -221,8 +212,55 @@ impl SignUpRequestHttpBody {
             Opaque::new(decoded_encrypted_private_key_nonce),
             self.encrypted_private_key,
             Opaque::new(decoded_public_key),
+            verification_ticket_token.into(),
+            verification_ticket_lifetime,
         ))
     }
+}
+
+fn verify_key_material(
+    password: &Password,
+    symmetric_key_salt: &[u8; 16],
+    encrypted_private_key_nonce: &[u8; 12],
+    encrypted_private_key: &[u8],
+    public_key: &[u8; 32],
+) -> Result<(), anyhow::Error> {
+    let mut symmetric_key_material = [0u8; 32];
+    argon2_instance()
+        .hash_password_into(
+            password.unsafe_inner().as_bytes(),
+            symmetric_key_salt,
+            &mut symmetric_key_material,
+        )
+        .map_err(|e| anyhow!("{e}").context("Failed to generate symmetric key material"))?;
+
+    let aes_gcm_key = Key::<Aes256Gcm>::from_slice(&symmetric_key_material);
+    let cipher = Aes256Gcm::new(aes_gcm_key);
+
+    let encrypted_private_key_nonce_aes_formatted =
+        Nonce::<Aes256Gcm>::from_slice(encrypted_private_key_nonce);
+
+    let decrypted_private_key = cipher
+        .decrypt(
+            encrypted_private_key_nonce_aes_formatted,
+            encrypted_private_key,
+        )
+        .map_err(|e| anyhow!("{e}").context("Failed to decrypt private key"))?;
+
+    if decrypted_private_key.len() != 32 {
+        return Err(anyhow!("Invalid decrypted private key length"));
+    }
+
+    let decrypted_private_key: [u8; 32] = slice_to_array(&decrypted_private_key);
+
+    let ed25519_secret_key = SigningKey::from_bytes(&decrypted_private_key);
+    let ed25519_public_key = ed25519_secret_key.verifying_key();
+
+    if ed25519_public_key.to_bytes().as_slice() != public_key.as_slice() {
+        return Err(anyhow!("Public key does not match decrypted private key"));
+    }
+
+    Ok(())
 }
 
 fn slice_to_array<const N: usize>(slice: &[u8]) -> [u8; N] {
@@ -310,6 +348,121 @@ impl From<Account> for AccountResponse {
     }
 }
 
+// #######################################################
+// ############### USE VERIFICATION TICKET ###############
+// #######################################################
+
+async fn use_verification_ticket(
+    State(app_state): State<AppState>,
+    Json(body): Json<UseVerificationTicketRequestHttpBody>,
+) -> Result<StatusCode, ApiError> {
+    let email = Email::new(&body.email).map_err(|e| match e {
+        EmailError::Empty => ApiError::BadRequest("Email cannot be empty".to_string()),
+        EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
+    })?;
+    let (account, ticket) = app_state
+        .accounts_repository
+        .find_account_and_last_verification_ticket_by_email(&email)
+        .await
+        .map_err(|e| match e {
+            FindLastVerificationTicketError::AccountNotFound => ApiError::NotFound,
+            FindLastVerificationTicketError::NoVerificationTicket => {
+                ApiError::BadRequest("No verification ticket has been found".to_string())
+            }
+            FindLastVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    let use_verification_ticket_request =
+        body.try_into_domain(account, ticket).map_err(|e| match e {
+            UseVerificationTicketRequestError::AlreadyVerified => {
+                ApiError::BadRequest("Account is already verified".to_string())
+            }
+            UseVerificationTicketRequestError::AlreadyUsed => {
+                ApiError::BadRequest("Verification ticket has already been used".to_string())
+            }
+            UseVerificationTicketRequestError::Cancelled => {
+                ApiError::BadRequest("Verification ticket has been cancelled".to_string())
+            }
+            UseVerificationTicketRequestError::Expired => {
+                ApiError::BadRequest("Verification ticket has expired".to_string())
+            }
+            UseVerificationTicketRequestError::InvalidToken => {
+                ApiError::BadRequest("Invalid verification ticket token".to_string())
+            }
+            UseVerificationTicketRequestError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    app_state
+        .accounts_repository
+        .verify_account(&use_verification_ticket_request)
+        .await
+        .map_err(|e| match e {
+            UseVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    info!("Account with email {} verified", &email);
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UseVerificationTicketRequestHttpBody {
+    pub email: String,
+    pub token: Opaque<String>,
+}
+
+impl UseVerificationTicketRequestHttpBody {
+    pub fn try_into_domain(
+        self,
+        account: Account,
+        verification_ticket: VerificationTicket,
+    ) -> Result<UseVerificationTicketRequest, UseVerificationTicketRequestError> {
+        if account.verified {
+            return Err(UseVerificationTicketRequestError::AlreadyVerified);
+        }
+
+        if verification_ticket.used_at.is_some() {
+            return Err(UseVerificationTicketRequestError::AlreadyUsed);
+        }
+
+        if verification_ticket.cancelled_at.is_some() {
+            return Err(UseVerificationTicketRequestError::Cancelled);
+        }
+
+        if verification_ticket.expires_at < chrono::Utc::now() {
+            return Err(UseVerificationTicketRequestError::Expired);
+        }
+
+        // Constant time comparison to prevent timing attacks
+        let decoded_input = BASE64_URL_SAFE
+            .decode(self.token.unsafe_inner())
+            .map_err(|_| UseVerificationTicketRequestError::InvalidToken)?;
+        let decoded_stored = BASE64_URL_SAFE
+            .decode(verification_ticket.token.unsafe_inner())
+            .map_err(|_| UseVerificationTicketRequestError::InvalidToken)?;
+
+        let compared_input = if decoded_input.len() != decoded_stored.len() {
+            // If lengths differ, create a dummy vector of the same length as stored token
+            vec![0u8; decoded_stored.len()]
+        } else {
+            decoded_input
+        };
+        let equal_side_by_side = compared_input
+            .iter()
+            .zip(decoded_stored.iter())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0;
+        if !equal_side_by_side {
+            return Err(UseVerificationTicketRequestError::InvalidToken);
+        }
+
+        Ok(UseVerificationTicketRequest::new(
+            account.id,
+            verification_ticket.id,
+        ))
+    }
+}
+
 // ##############################################################
 // ############### TEST EXISTENCE - TO BE REMOVED ###############
 // ##############################################################
@@ -324,17 +477,18 @@ async fn test_user_exists(
     })?;
     match app_state
         .accounts_repository
-        .get_account_by_email(&email)
+        .find_account_by_email(&email)
         .await
     {
         Ok(_) => Ok(StatusCode::OK),
-        Err(GetAccountError::NotFound) => Ok(StatusCode::NOT_FOUND),
+        Err(FindAccountError::NotFound) => Ok(StatusCode::NOT_FOUND),
         Err(e) => Err(ApiError::InternalServerError(e.into())),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use base64::prelude::BASE64_URL_SAFE;
     use fake::{Fake, Faker};
 
     use super::*;
@@ -384,6 +538,14 @@ mod tests {
                 .verify(signup_request.password_hash.unsafe_inner())
                 .is_ok()
         );
+
+        assert!(
+            !signup_request
+                .verification_ticket_token
+                .unsafe_inner()
+                .is_empty()
+        );
+        assert!(signup_request.verification_ticket_expires_at > chrono::Utc::now());
     }
 
     #[test]
@@ -531,9 +693,149 @@ mod tests {
         };
     }
 
+    #[test]
+    fn test_valid_use_verification_ticket_request() {
+        let account = fake_account();
+        let verification_ticket = fake_verification_ticket(account.id);
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_ok());
+        let use_verification_ticket_request = result.unwrap();
+        assert_eq!(use_verification_ticket_request.account_id, account.id);
+        assert_eq!(
+            use_verification_ticket_request.valid_ticket_id,
+            verification_ticket.id
+        );
+    }
+
+    #[test]
+    fn test_invalid_token_use_verification_ticket_request() {
+        let account = fake_account();
+        let verification_ticket = fake_verification_ticket(account.id);
+        let mut http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        // Corrupt the token
+        let corrupted_token = {
+            let mut token_bytes = BASE64_URL_SAFE
+                .decode(http_request.token.unsafe_inner())
+                .unwrap();
+            token_bytes[0] ^= 0xFF; // Flip some bits
+            BASE64_URL_SAFE.encode(token_bytes)
+        };
+        http_request.token = Opaque::new(corrupted_token);
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::InvalidToken => {}
+            _ => panic!("Expected InvalidToken error"),
+        };
+    }
+
+    #[test]
+    fn test_account_already_verified_use_verification_ticket_request() {
+        let mut account = fake_account();
+        account.verified = true;
+        let verification_ticket = fake_verification_ticket(account.id);
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::AlreadyVerified => {}
+            _ => panic!("Expected AlreadyVerified error"),
+        };
+    }
+
+    #[test]
+    fn test_ticket_already_used_use_verification_ticket_request() {
+        let account = fake_account();
+        let mut verification_ticket = fake_verification_ticket(account.id);
+        verification_ticket.used_at = Some(chrono::Utc::now());
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::AlreadyUsed => {}
+            _ => panic!("Expected AlreadyUsed error"),
+        };
+    }
+
+    #[test]
+    fn test_ticket_cancelled_use_verification_ticket_request() {
+        let account = fake_account();
+        let mut verification_ticket = fake_verification_ticket(account.id);
+        verification_ticket.cancelled_at = Some(chrono::Utc::now());
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::Cancelled => {}
+            _ => panic!("Expected Cancelled error"),
+        };
+    }
+
+    #[test]
+    fn test_ticket_expired_use_verification_ticket_request() {
+        let account = fake_account();
+        let mut verification_ticket = fake_verification_ticket(account.id);
+        verification_ticket.expires_at = chrono::Utc::now() - chrono::Duration::minutes(1);
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::Expired => {}
+            _ => panic!("Expected Expired error"),
+        };
+    }
+
     fn flip_first_byte(base64_str: &str) -> String {
         let mut bytes = BASE64_STANDARD.decode(base64_str).unwrap();
         bytes[0] ^= 0xFF; // Flip some bits
         BASE64_STANDARD.encode(bytes)
+    }
+
+    fn fake_account() -> Account {
+        let password = Faker.fake::<Password>();
+        Account {
+            id: uuid::Uuid::new_v4(),
+            email: Faker.fake(),
+            password_hash: password.hash().unwrap().into(),
+            verified: false,
+            symmetric_key_salt: Opaque::new(Faker.fake::<[u8; 16]>()),
+            encrypted_private_key_nonce: Opaque::new(Faker.fake::<[u8; 12]>()),
+            encrypted_private_key: Opaque::new(BASE64_STANDARD.encode(vec![0u8; 64])),
+            public_key: Opaque::new(Faker.fake::<[u8; 32]>()),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn fake_verification_ticket(account_id: uuid::Uuid) -> VerificationTicket {
+        VerificationTicket {
+            id: uuid::Uuid::new_v4(),
+            account_id,
+            token: Opaque::new(BASE64_URL_SAFE.encode(Faker.fake::<[u8; 32]>())),
+            expires_at: chrono::Utc::now() + chrono::Duration::minutes(15),
+            created_at: chrono::Utc::now(),
+            cancelled_at: None,
+            used_at: None,
+            updated_at: chrono::Utc::now(),
+        }
     }
 }

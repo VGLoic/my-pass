@@ -7,6 +7,7 @@ CREATE TABLE "account" (
     -- The UNIQUE constraint on email creates an index, which is relied upon for primary account lookups.
     email                       TEXT        NOT NULL    UNIQUE,
     password_hash               TEXT        NOT NULL,
+    verified                    BOOLEAN     NOT NULL    DEFAULT FALSE,
     symmetric_key_salt          BYTEA       NOT NULL,
     encrypted_private_key_nonce BYTEA       NOT NULL,
     encrypted_private_key       TEXT        NOT NULL,
@@ -14,9 +15,22 @@ CREATE TABLE "account" (
     created_at                  TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP,
     updated_at                  TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP
 );
-
-
 CREATE TRIGGER update_account_moddatetime
 BEFORE UPDATE ON "account"
+FOR EACH ROW
+EXECUTE FUNCTION moddatetime('updated_at');
+
+CREATE TABLE IF NOT EXISTS "verification_ticket" (
+    id              UUID                                NOT NULL    PRIMARY KEY DEFAULT uuid_generate_v4 (),
+    account_id      UUID                                NOT NULL,
+    token           TEXT                                NOT NULL,
+    created_at      TIMESTAMPTZ                         NOT NULL    DEFAULT CURRENT_TIMESTAMP,
+    expires_at      TIMESTAMPTZ                         NOT NULL,
+    cancelled_at    TIMESTAMPTZ                         NULL,
+    used_at         TIMESTAMPTZ                         NULL,
+    updated_at      TIMESTAMPTZ                         NOT NULL    DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TRIGGER update_verification_ticket_moddatetime
+BEFORE UPDATE ON "verification_ticket"
 FOR EACH ROW
 EXECUTE FUNCTION moddatetime('updated_at');

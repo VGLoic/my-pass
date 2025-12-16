@@ -1,18 +1,23 @@
-use sqlx::{Pool, Postgres, query_as};
+use anyhow::anyhow;
+use sqlx::{Pool, Postgres, Row, query, query_as};
 
-use super::{Account, CreateAccountError, GetAccountError, SignupRequest};
+use super::{
+    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, SignupRequest,
+    UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
+};
 use crate::newtypes::Email;
 
 /// Defines the AccountsRepository trait for account-related database operations.
 #[async_trait::async_trait]
 pub trait AccountsRepository: Send + Sync + 'static {
-    /// Creates a new [Account] in the repository.
+    /// Creates a new [Account] in the repository. Creates a new [VerificationTicket] as part of the process.
     ///
     /// # Arguments
-    /// * `signup_request` - A reference to the [SignupRequest] containing account details.
+    /// * `signup_request` - A reference to the [SignupRequest] containing account and ticket details.
     ///
     /// # Returns
     /// * `Account` - The created [Account].
+    /// * `VerificationTicket` - The created [VerificationTicket].
     ///
     /// # Errors
     /// - MUST return [CreateAccountError::EmailAlreadyCreated] if an account with the given email already exists.
@@ -20,7 +25,7 @@ pub trait AccountsRepository: Send + Sync + 'static {
     async fn create_account(
         &self,
         signup_request: &SignupRequest,
-    ) -> Result<Account, CreateAccountError>;
+    ) -> Result<(Account, VerificationTicket), CreateAccountError>;
 
     /// Retrieves an [Account] by its email.
     ///
@@ -31,9 +36,36 @@ pub trait AccountsRepository: Send + Sync + 'static {
     /// * `Account` - The retrieved [Account].
     ///
     /// # Errors
-    /// - MUST return [GetAccountError::NotFound] if no account with the given email exists.
-    /// - MUST return [GetAccountError::Unknown] for any other errors encountered during retrieval.
-    async fn get_account_by_email(&self, email: &Email) -> Result<Account, GetAccountError>;
+    /// - MUST return [FindAccountError::NotFound] if no account with the given email exists.
+    /// - MUST return [FindAccountError::Unknown] for any other errors encountered during retrieval.
+    async fn find_account_by_email(&self, email: &Email) -> Result<Account, FindAccountError>;
+
+    /// Retrieves an [Account] along with its last [VerificationTicket] by email.
+    /// # Arguments
+    /// * `email` - A string slice representing the email of the account to retrieve.
+    /// # Returns
+    /// * `Account` - The retrieved [Account]
+    /// * `VerificationTicket` - The last [VerificationTicket] associated with the account.
+    /// # Errors
+    /// - MUST return [FindLastVerificationTicketError::AccountNotFound] if no account with the given email exists,
+    /// - MUST return [FindLastVerificationTicketError::NoVerificationTicket] if the account exists but has no associated verification tickets,
+    /// - MUST return [FindLastVerificationTicketError::Unknown] for any other errors encountered during retrieval.
+    async fn find_account_and_last_verification_ticket_by_email(
+        &self,
+        email: &Email,
+    ) -> Result<(Account, VerificationTicket), FindLastVerificationTicketError>;
+
+    /// Verifies an account and marks the associated verification ticket as used.
+    /// # Arguments
+    /// * `request` - A [UseVerificationTicketRequest] containing the account ID and valid ticket ID.
+    /// # Returns
+    /// * `()` - Indicates successful verification.
+    /// # Errors
+    /// - MUST return [UseVerificationTicketError::Unknown] for any errors encountered during verification
+    async fn verify_account(
+        &self,
+        request: &UseVerificationTicketRequest,
+    ) -> Result<(), UseVerificationTicketError>;
 }
 
 #[derive(Clone)]
@@ -52,7 +84,13 @@ impl AccountsRepository for PsqlAccountsRepository {
     async fn create_account(
         &self,
         signup_request: &SignupRequest,
-    ) -> Result<Account, CreateAccountError> {
+    ) -> Result<(Account, VerificationTicket), CreateAccountError> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| anyhow!(e).context("failed to start transaction"))?;
+
         let account = query_as::<_, Account>(
             r#"
             INSERT INTO account (
@@ -67,6 +105,7 @@ impl AccountsRepository for PsqlAccountsRepository {
                 id,
                 email,
                 password_hash,
+                verified,
                 symmetric_key_salt,
                 encrypted_private_key_nonce,
                 encrypted_private_key,
@@ -81,23 +120,55 @@ impl AccountsRepository for PsqlAccountsRepository {
         .bind(&signup_request.encrypted_private_key_nonce)
         .bind(&signup_request.encrypted_private_key)
         .bind(&signup_request.public_key)
-        .fetch_one(&self.pool)
-        .await;
-        match account {
-            Ok(account) => Ok(account),
-            Err(sqlx::Error::Database(db_err))
-                if db_err.code() == Some("23505".into()) && db_err.message().contains("email") =>
-            {
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|e| {
+            if let sqlx::Error::Database(db_err) = &e
                 // 23505 is the PostgreSQL error code for unique_violation
-                Err(CreateAccountError::EmailAlreadyCreated)
+                && db_err.code() == Some("23505".into())
+                && db_err.message().contains("email")
+            {
+                CreateAccountError::EmailAlreadyCreated
+            } else {
+                anyhow::Error::new(e).context("creating account").into()
             }
-            Err(e) => Err(CreateAccountError::Unknown(
-                anyhow::Error::new(e).context("creating account"),
-            )),
-        }
+        })?;
+
+        let verification_ticket = query_as::<_, VerificationTicket>(
+            r#"
+            INSERT INTO verification_ticket (
+                account_id,
+                token,
+                expires_at
+            ) VALUES ($1, $2, $3)
+             RETURNING
+                id,
+                account_id,
+                token,
+                expires_at,
+                created_at,
+                expires_at,
+                cancelled_at,
+                used_at,
+                updated_at
+        "#,
+        )
+        .bind(account.id)
+        .bind(&signup_request.verification_ticket_token)
+        .bind(signup_request.verification_ticket_expires_at)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|e| anyhow!(e).context("failed to create verification ticket"))?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|e| anyhow!(e).context("failed to commit transaction"))?;
+
+        Ok((account, verification_ticket))
     }
 
-    async fn get_account_by_email(&self, email: &Email) -> Result<Account, GetAccountError> {
+    async fn find_account_by_email(&self, email: &Email) -> Result<Account, FindAccountError> {
         // The `r` is for raw string literals in Rust, allowing us to write SQL queries without caring about escaping characters.
         // The `#` is a delimiter that allows us to include double quotes in the SQL query without needing to escape them.
         let query_result = query_as::<_, Account>(
@@ -106,6 +177,7 @@ impl AccountsRepository for PsqlAccountsRepository {
                 id,
                 email,
                 password_hash,
+                verified,
                 symmetric_key_salt,
                 encrypted_private_key_nonce,
                 encrypted_private_key,
@@ -121,10 +193,184 @@ impl AccountsRepository for PsqlAccountsRepository {
         .await;
         match query_result {
             Ok(account) => Ok(account),
-            Err(sqlx::Error::RowNotFound) => Err(GetAccountError::NotFound),
-            Err(e) => Err(GetAccountError::Unknown(
+            Err(sqlx::Error::RowNotFound) => Err(FindAccountError::NotFound),
+            Err(e) => Err(FindAccountError::Unknown(
                 anyhow::Error::new(e).context("retrieving account by email"),
             )),
         }
+    }
+
+    async fn find_account_and_last_verification_ticket_by_email(
+        &self,
+        email: &Email,
+    ) -> Result<(Account, VerificationTicket), FindLastVerificationTicketError> {
+        let query_result = query(
+            r#"
+            SELECT
+                a.id,
+                a.email,
+                a.password_hash,
+                a.verified,
+                a.symmetric_key_salt,
+                a.encrypted_private_key_nonce,
+                a.encrypted_private_key,
+                a.public_key,
+                a.created_at,
+                a.updated_at,
+                vt.id,
+                vt.account_id,
+                vt.token,
+                vt.created_at,
+                vt.expires_at,
+                vt.cancelled_at,
+                vt.used_at,
+                vt.updated_at
+            FROM account a
+            LEFT JOIN verification_ticket vt ON a.id = vt.account_id
+            WHERE a.email = $1
+            ORDER BY vt.created_at DESC
+            LIMIT 1
+        "#,
+        )
+        .bind(email)
+        .fetch_one(&self.pool)
+        .await;
+
+        match query_result {
+            Ok(row) => {
+                let account = Account {
+                    id: row
+                        .try_get(0)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing account id"))?,
+                    email: row
+                        .try_get(1)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing account email"))?,
+                    password_hash: row.try_get(2).map_err(|e| {
+                        anyhow::Error::new(e).context("parsing account password_hash")
+                    })?,
+                    verified: row
+                        .try_get(3)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing account verified"))?,
+                    symmetric_key_salt: row.try_get(4).map_err(|e| {
+                        anyhow::Error::new(e).context("parsing account symmetric_key_salt")
+                    })?,
+                    encrypted_private_key_nonce: row.try_get(5).map_err(|e| {
+                        anyhow::Error::new(e).context("parsing account encrypted_private_key_nonce")
+                    })?,
+                    encrypted_private_key: row.try_get(6).map_err(|e| {
+                        anyhow::Error::new(e).context("parsing account encrypted_private_key")
+                    })?,
+                    public_key: row
+                        .try_get(7)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing account public_key"))?,
+                    created_at: row
+                        .try_get(8)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing account created_at"))?,
+                    updated_at: row
+                        .try_get(9)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing account updated_at"))?,
+                };
+
+                let verification_ticket_exists: Option<uuid::Uuid> =
+                    row.try_get(10).map_err(|e| {
+                        anyhow::Error::new(e).context("checking verification ticket existence")
+                    })?;
+                if verification_ticket_exists.is_none() {
+                    return Err(FindLastVerificationTicketError::NoVerificationTicket);
+                }
+
+                let ticket = VerificationTicket {
+                    id: row
+                        .try_get(10)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing ticket id"))?,
+                    account_id: row
+                        .try_get(11)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing ticket account_id"))?,
+                    token: row
+                        .try_get(12)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing ticket token"))?,
+                    created_at: row
+                        .try_get(13)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing ticket created_at"))?,
+                    expires_at: row
+                        .try_get(14)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing ticket expires_at"))?,
+                    cancelled_at: row.try_get(15).map_err(|e| {
+                        anyhow::Error::new(e).context("parsing ticket cancelled_at")
+                    })?,
+                    used_at: row
+                        .try_get(16)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing ticket used_at"))?,
+                    updated_at: row
+                        .try_get(17)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing ticket updated_at"))?,
+                };
+
+                Ok((account, ticket))
+            }
+            Err(sqlx::Error::RowNotFound) => Err(FindLastVerificationTicketError::AccountNotFound),
+            Err(e) => Err(FindLastVerificationTicketError::Unknown(
+                anyhow::Error::new(e)
+                    .context("retrieving account and last verification ticket by email"),
+            )),
+        }
+    }
+
+    async fn verify_account(
+        &self,
+        request: &UseVerificationTicketRequest,
+    ) -> Result<(), UseVerificationTicketError> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| anyhow!(e).context("failed to start transaction"))?;
+
+        // Mark the account as verified
+        // We only update the account if it is not already verified, we verify that the number of affected rows is 1
+        let updated_row = query(
+            r#"
+            UPDATE account
+            SET verified = TRUE
+            WHERE id = $1 AND verified = FALSE
+        "#,
+        )
+        .bind(request.account_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|e| anyhow!(e).context("failed to verify account"))?;
+        if updated_row.rows_affected() != 1 {
+            return Err(anyhow!("no rows updated")
+                .context("account is already verified")
+                .into());
+        }
+
+        // Mark the verification ticket as used
+        // We only update the ticket if it is unused and not cancelled, we verify that the number of affected rows is 1
+        let updated_row = query(
+            r#"
+            UPDATE verification_ticket
+            SET used_at = NOW()
+            WHERE id = $1 AND account_id = $2 AND used_at IS NULL AND cancelled_at IS NULL
+        "#,
+        )
+        .bind(request.valid_ticket_id)
+        .bind(request.account_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|e| anyhow!(e).context("failed to mark verification ticket as used"))?;
+
+        if updated_row.rows_affected() != 1 {
+            return Err(anyhow!("no rows updated")
+                .context("verification ticket was already used or cancelled")
+                .into());
+        }
+
+        transaction
+            .commit()
+            .await
+            .map_err(|e| anyhow!(e).context("failed to commit transaction"))?;
+
+        Ok(())
     }
 }
