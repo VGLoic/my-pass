@@ -21,13 +21,16 @@ use fake::{Dummy, Fake, Faker, rand};
 use serde::{Deserialize, Serialize};
 
 use crate::domains::accounts::{
-    Account, CreateAccountError, GetAccountError, SignupRequest, SignupRequestError,
+    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, SignupRequest,
+    SignupRequestError, UseVerificationTicketError, UseVerificationTicketRequest,
+    UseVerificationTicketRequestError, VerificationTicket,
 };
 use tracing::info;
 
 pub fn accounts_router() -> Router<AppState> {
     Router::new()
         .route("/signup", post(sign_up))
+        .route("/verification-tickets/use", post(use_verification_ticket))
         // Added a test route for checking user existence
         .route("/{email}/test-exists", get(test_user_exists))
 }
@@ -342,6 +345,102 @@ impl From<Account> for AccountResponse {
     }
 }
 
+// #######################################################
+// ############### USE VERIFICATION TICKET ###############
+// #######################################################
+
+async fn use_verification_ticket(
+    State(app_state): State<AppState>,
+    Json(body): Json<UseVerificationTicketRequestHttpBody>,
+) -> Result<StatusCode, ApiError> {
+    let email = Email::new(&body.email).map_err(|e| match e {
+        EmailError::Empty => ApiError::BadRequest("Email cannot be empty".to_string()),
+        EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
+    })?;
+    let (account, ticket) = app_state
+        .accounts_repository
+        .find_account_and_last_verification_ticket_by_email(&email)
+        .await
+        .map_err(|e| match e {
+            FindLastVerificationTicketError::AccountNotFound => ApiError::NotFound,
+            FindLastVerificationTicketError::NoVerificationTicket => {
+                ApiError::BadRequest("No verification ticket has been found".to_string())
+            }
+            FindLastVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    let use_verification_ticket_request =
+        body.try_into_domain(account, ticket).map_err(|e| match e {
+            UseVerificationTicketRequestError::AlreadyVerified => {
+                ApiError::BadRequest("Account is already verified".to_string())
+            }
+            UseVerificationTicketRequestError::AlreadyUsed => {
+                ApiError::BadRequest("Verification ticket has already been used".to_string())
+            }
+            UseVerificationTicketRequestError::Cancelled => {
+                ApiError::BadRequest("Verification ticket has been cancelled".to_string())
+            }
+            UseVerificationTicketRequestError::Expired => {
+                ApiError::BadRequest("Verification ticket has expired".to_string())
+            }
+            UseVerificationTicketRequestError::InvalidToken => {
+                ApiError::BadRequest("Invalid verification ticket token".to_string())
+            }
+            UseVerificationTicketRequestError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    app_state
+        .accounts_repository
+        .verify_account(&use_verification_ticket_request)
+        .await
+        .map_err(|e| match e {
+            UseVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    info!("Account with email {} verified", &email);
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UseVerificationTicketRequestHttpBody {
+    pub email: String,
+    pub token: Opaque<String>,
+}
+
+impl UseVerificationTicketRequestHttpBody {
+    pub fn try_into_domain(
+        self,
+        account: Account,
+        verification_ticket: VerificationTicket,
+    ) -> Result<UseVerificationTicketRequest, UseVerificationTicketRequestError> {
+        if account.verified {
+            return Err(UseVerificationTicketRequestError::AlreadyVerified);
+        }
+
+        if verification_ticket.used_at.is_some() {
+            return Err(UseVerificationTicketRequestError::AlreadyUsed);
+        }
+
+        if verification_ticket.cancelled_at.is_some() {
+            return Err(UseVerificationTicketRequestError::Cancelled);
+        }
+
+        if verification_ticket.expires_at < chrono::Utc::now() {
+            return Err(UseVerificationTicketRequestError::Expired);
+        }
+
+        if verification_ticket.token.unsafe_inner() != self.token.unsafe_inner() {
+            return Err(UseVerificationTicketRequestError::InvalidToken);
+        }
+
+        Ok(UseVerificationTicketRequest::new(
+            account.id,
+            verification_ticket.id,
+        ))
+    }
+}
+
 // ##############################################################
 // ############### TEST EXISTENCE - TO BE REMOVED ###############
 // ##############################################################
@@ -356,11 +455,11 @@ async fn test_user_exists(
     })?;
     match app_state
         .accounts_repository
-        .get_account_by_email(&email)
+        .find_account_by_email(&email)
         .await
     {
         Ok(_) => Ok(StatusCode::OK),
-        Err(GetAccountError::NotFound) => Ok(StatusCode::NOT_FOUND),
+        Err(FindAccountError::NotFound) => Ok(StatusCode::NOT_FOUND),
         Err(e) => Err(ApiError::InternalServerError(e.into())),
     }
 }

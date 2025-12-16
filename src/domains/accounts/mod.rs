@@ -109,14 +109,68 @@ pub enum CreateAccountError {
     Unknown(#[from] anyhow::Error),
 }
 
+// #######################################################
+// ############### USE VERIFICATION TICKET ###############
+// #######################################################
+
+pub struct UseVerificationTicketRequest {
+    pub account_id: uuid::Uuid,
+    pub valid_ticket_id: uuid::Uuid,
+}
+
+#[derive(Debug, Error)]
+pub enum UseVerificationTicketRequestError {
+    #[error("Account is already verified")]
+    AlreadyVerified,
+    #[error("Verification ticket already used")]
+    AlreadyUsed,
+    #[error("Verification ticket cancelled")]
+    Cancelled,
+    #[error("Verification ticket is expired")]
+    Expired,
+    #[error("Invalid verification ticket token")]
+    InvalidToken,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+impl UseVerificationTicketRequest {
+    pub fn new(account_id: uuid::Uuid, valid_ticket_id: uuid::Uuid) -> Self {
+        UseVerificationTicketRequest {
+            account_id,
+            valid_ticket_id,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum UseVerificationTicketError {
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
 // #################################################
 // ############### ACCOUNT RETRIEVAL ###############
 // #################################################
 
 #[derive(Debug, Error)]
-pub enum GetAccountError {
+pub enum FindAccountError {
     #[error("Account not found")]
     NotFound,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+// #############################################################
+// ############### VERIFICATION TICKET RETRIEVAL ###############
+// #############################################################
+
+#[derive(Debug, Error)]
+pub enum FindLastVerificationTicketError {
+    #[error("Account not found")]
+    AccountNotFound,
+    #[error("No verification ticket found")]
+    NoVerificationTicket,
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
 }
