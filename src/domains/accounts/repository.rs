@@ -47,8 +47,8 @@ pub trait AccountsRepository: Send + Sync + 'static {
     /// * `Account` - The retrieved [Account]
     /// * `VerificationTicket` - The last [VerificationTicket] associated with the account.
     /// # Errors
-    /// - MUST return [FindLastVerificationTicketError::NotFound] if no account with the given email exists,
-    /// - MUST return [FindLastVerificationTicketError::NoTicket] if the account exists but has no associated verification tickets,
+    /// - MUST return [FindLastVerificationTicketError::AccountNotFound] if no account with the given email exists,
+    /// - MUST return [FindLastVerificationTicketError::NoVerificationTicket] if the account exists but has no associated verification tickets,
     /// - MUST return [FindLastVerificationTicketError::Unknown] for any other errors encountered during retrieval.
     async fn find_account_and_last_verification_ticket_by_email(
         &self,
