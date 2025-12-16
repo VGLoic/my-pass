@@ -466,6 +466,7 @@ async fn test_user_exists(
 
 #[cfg(test)]
 mod tests {
+    use base64::prelude::BASE64_URL_SAFE;
     use fake::{Fake, Faker};
 
     use super::*;
@@ -670,9 +671,149 @@ mod tests {
         };
     }
 
+    #[test]
+    fn test_valid_use_verification_ticket_request() {
+        let account = fake_account();
+        let verification_ticket = fake_verification_ticket(account.id);
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_ok());
+        let use_verification_ticket_request = result.unwrap();
+        assert_eq!(use_verification_ticket_request.account_id, account.id);
+        assert_eq!(
+            use_verification_ticket_request.valid_ticket_id,
+            verification_ticket.id
+        );
+    }
+
+    #[test]
+    fn test_invalid_token_use_verification_ticket_request() {
+        let account = fake_account();
+        let verification_ticket = fake_verification_ticket(account.id);
+        let mut http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        // Corrupt the token
+        let corrupted_token = {
+            let mut token_bytes = BASE64_URL_SAFE
+                .decode(http_request.token.unsafe_inner())
+                .unwrap();
+            token_bytes[0] ^= 0xFF; // Flip some bits
+            BASE64_URL_SAFE.encode(token_bytes)
+        };
+        http_request.token = Opaque::new(corrupted_token);
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::InvalidToken => {}
+            _ => panic!("Expected InvalidToken error"),
+        };
+    }
+
+    #[test]
+    fn test_account_already_verified_use_verification_ticket_request() {
+        let mut account = fake_account();
+        account.verified = true;
+        let verification_ticket = fake_verification_ticket(account.id);
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::AlreadyVerified => {}
+            _ => panic!("Expected AlreadyVerified error"),
+        };
+    }
+
+    #[test]
+    fn test_ticket_already_used_use_verification_ticket_request() {
+        let account = fake_account();
+        let mut verification_ticket = fake_verification_ticket(account.id);
+        verification_ticket.used_at = Some(chrono::Utc::now());
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::AlreadyUsed => {}
+            _ => panic!("Expected AlreadyUsed error"),
+        };
+    }
+
+    #[test]
+    fn test_ticket_cancelled_use_verification_ticket_request() {
+        let account = fake_account();
+        let mut verification_ticket = fake_verification_ticket(account.id);
+        verification_ticket.cancelled_at = Some(chrono::Utc::now());
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::Cancelled => {}
+            _ => panic!("Expected Cancelled error"),
+        };
+    }
+
+    #[test]
+    fn test_ticket_expired_use_verification_ticket_request() {
+        let account = fake_account();
+        let mut verification_ticket = fake_verification_ticket(account.id);
+        verification_ticket.expires_at = chrono::Utc::now() - chrono::Duration::minutes(1);
+        let http_request = UseVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            token: verification_ticket.token.clone(),
+        };
+        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            UseVerificationTicketRequestError::Expired => {}
+            _ => panic!("Expected Expired error"),
+        };
+    }
+
     fn flip_first_byte(base64_str: &str) -> String {
         let mut bytes = BASE64_STANDARD.decode(base64_str).unwrap();
         bytes[0] ^= 0xFF; // Flip some bits
         BASE64_STANDARD.encode(bytes)
+    }
+
+    fn fake_account() -> Account {
+        let password = Faker.fake::<Password>();
+        Account {
+            id: uuid::Uuid::new_v4(),
+            email: Faker.fake(),
+            password_hash: password.hash().unwrap().into(),
+            verified: false,
+            symmetric_key_salt: Opaque::new(Faker.fake::<[u8; 16]>()),
+            encrypted_private_key_nonce: Opaque::new(Faker.fake::<[u8; 12]>()),
+            encrypted_private_key: Opaque::new(BASE64_STANDARD.encode(vec![0u8; 64])),
+            public_key: Opaque::new(Faker.fake::<[u8; 32]>()),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn fake_verification_ticket(account_id: uuid::Uuid) -> VerificationTicket {
+        VerificationTicket {
+            id: uuid::Uuid::new_v4(),
+            account_id,
+            token: Opaque::new(BASE64_URL_SAFE.encode(Faker.fake::<[u8; 32]>())),
+            expires_at: chrono::Utc::now() + chrono::Duration::minutes(15),
+            created_at: chrono::Utc::now(),
+            cancelled_at: None,
+            used_at: None,
+            updated_at: chrono::Utc::now(),
+        }
     }
 }
