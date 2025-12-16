@@ -327,17 +327,23 @@ impl AccountsRepository for PsqlAccountsRepository {
             .map_err(|e| anyhow!(e).context("failed to start transaction"))?;
 
         // Mark the account as verified
-        query(
+        // We only update the account if it is not already verified, we verify that the number of affected rows is 1
+        let updated_row = query(
             r#"
             UPDATE account
             SET verified = TRUE
-            WHERE id = $1
+            WHERE id = $1 AND verified = FALSE
         "#,
         )
         .bind(request.account_id)
         .execute(&mut *transaction)
         .await
         .map_err(|e| anyhow!(e).context("failed to verify account"))?;
+        if updated_row.rows_affected() != 1 {
+            return Err(anyhow!("no rows updated")
+                .context("account is already verified")
+                .into());
+        }
 
         // Mark the verification ticket as used
         // We only update the ticket if it is unused and not cancelled, we verify that the number of affected rows is 1
