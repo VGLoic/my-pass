@@ -245,7 +245,7 @@ fn verify_key_material(
             encrypted_private_key_nonce_aes_formatted,
             encrypted_private_key,
         )
-        .map_err(|_| SignupRequestError::InvalidKeyPair)?;
+        .map_err(|e| anyhow!("{e}").context("Failed to decrypt private key"))?;
 
     if decrypted_private_key.len() != 32 {
         return Err(anyhow!("Invalid decrypted private key length"));
