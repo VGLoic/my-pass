@@ -19,6 +19,7 @@ pub struct DummyAccountsNotifier;
 impl AccountsNotifier for DummyAccountsNotifier {
     async fn account_signed_up(&self, account: &Account, verification_ticket: &VerificationTicket) {
         // No-op
+        // We log the event for demonstration purposes, this is not safe for production use
         info!(
             "Triggered account_signed_up notification for email \"{}\" with ticket \"{}\"",
             account.email,
