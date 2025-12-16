@@ -417,7 +417,12 @@ mod tests {
                 .is_ok()
         );
 
-        assert!(!signup_request.verification_ticket_token.unsafe_inner().is_empty());
+        assert!(
+            !signup_request
+                .verification_ticket_token
+                .unsafe_inner()
+                .is_empty()
+        );
         assert!(signup_request.verification_ticket_expires_at > chrono::Utc::now());
     }
 
