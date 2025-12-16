@@ -7,6 +7,7 @@ CREATE TABLE "account" (
     -- The UNIQUE constraint on email creates an index, which is relied upon for primary account lookups.
     email                       TEXT        NOT NULL    UNIQUE,
     password_hash               TEXT        NOT NULL,
+    verified                    BOOLEAN     NOT NULL    DEFAULT FALSE,
     symmetric_key_salt          BYTEA       NOT NULL,
     encrypted_private_key_nonce BYTEA       NOT NULL,
     encrypted_private_key       TEXT        NOT NULL,

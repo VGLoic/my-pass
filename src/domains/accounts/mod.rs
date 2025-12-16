@@ -16,6 +16,7 @@ pub struct Account {
     pub email: Email,
     #[allow(dead_code)]
     pub password_hash: Opaque<String>,
+    pub verified: bool,
     pub symmetric_key_salt: Opaque<[u8; 16]>,
     pub encrypted_private_key_nonce: Opaque<[u8; 12]>,
     pub encrypted_private_key: Opaque<String>,
