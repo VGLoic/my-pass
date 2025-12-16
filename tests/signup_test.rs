@@ -37,10 +37,12 @@ async fn test_signup() {
         StatusCode::OK
     );
 
-    assert!(
+    assert_eq!(
         instance_state
             .accounts_notifier
-            .has_account_signed_up(&signup_body.email, 1)
+            .get_account_tickets(&signup_body.email)
+            .len(),
+        1
     );
 }
 
@@ -80,9 +82,11 @@ async fn test_successive_signup() {
         StatusCode::BAD_REQUEST
     );
 
-    assert!(
+    assert_eq!(
         instance_state
             .accounts_notifier
-            .has_account_signed_up(&signup_body.email, 1)
+            .get_account_tickets(&signup_body.email)
+            .len(),
+        1
     );
 }

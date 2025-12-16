@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -11,7 +12,7 @@ use axum::{
 };
 use my_pass::{
     Config,
-    domains::accounts::{Account, notifier::AccountsNotifier},
+    domains::accounts::{Account, VerificationTicket, notifier::AccountsNotifier},
     routes::app_router,
 };
 use sqlx::postgres::PgPoolOptions;
@@ -134,32 +135,31 @@ async fn bind_listener_to_free_port() -> Result<tokio::net::TcpListener, anyhow:
 /// It implements the `AccountsNotifier` trait
 #[derive(Clone)]
 pub struct FakeAccountsNotifier {
-    pub signed_up_accounts: Arc<Mutex<Vec<Account>>>,
+    pub verification_tickets: Arc<Mutex<HashMap<String, Vec<VerificationTicket>>>>,
 }
 
 impl FakeAccountsNotifier {
     pub fn new() -> Self {
         Self {
-            signed_up_accounts: Arc::new(Mutex::new(Vec::new())),
+            verification_tickets: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     #[allow(dead_code)]
-    pub fn has_account_signed_up(&self, email: &str, count: usize) -> bool {
+    pub fn get_account_tickets(&self, email: &str) -> Vec<VerificationTicket> {
         let lowercase_email = email.to_lowercase();
-        let accounts = self.signed_up_accounts.lock().unwrap();
-        accounts
-            .iter()
-            .filter(|account| account.email.to_string() == lowercase_email)
-            .count()
-            == count
+        let tickets = self.verification_tickets.lock().unwrap();
+        tickets.get(&lowercase_email).cloned().unwrap_or_default()
     }
 }
 
 #[async_trait::async_trait]
 impl AccountsNotifier for FakeAccountsNotifier {
-    async fn account_signed_up(&self, account: &Account) {
-        let mut accounts = self.signed_up_accounts.lock().unwrap();
-        accounts.push(account.clone());
+    async fn account_signed_up(&self, account: &Account, ticket: &VerificationTicket) {
+        let mut tickets = self.verification_tickets.lock().unwrap();
+        tickets
+            .entry(account.email.to_string().to_lowercase())
+            .or_default()
+            .push(ticket.clone());
     }
 }

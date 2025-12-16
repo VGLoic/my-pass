@@ -17,7 +17,7 @@ use axum::{
 };
 use base64::{Engine, prelude::BASE64_STANDARD};
 use ed25519_dalek::SigningKey;
-use fake::{Dummy, Fake, Faker};
+use fake::{Dummy, Fake, Faker, rand};
 use serde::{Deserialize, Serialize};
 
 use crate::domains::accounts::{
@@ -65,7 +65,7 @@ async fn sign_up(
         SignupRequestError::Unknown(e) => ApiError::InternalServerError(e),
     })?;
 
-    let created_account = app_state
+    let (created_account, created_ticket) = app_state
         .accounts_repository
         .create_account(&signup_request)
         .await
@@ -78,7 +78,7 @@ async fn sign_up(
 
     app_state
         .accounts_notifier
-        .account_signed_up(&created_account)
+        .account_signed_up(&created_account, &created_ticket)
         .await;
 
     info!("Account created with email: {}", created_account.email);
@@ -140,17 +140,6 @@ impl SignUpRequestHttpBody {
             ));
         }
         let decoded_symmetric_key_salt: [u8; 16] = slice_to_array(&decoded_symmetric_key_salt);
-        let mut symmetric_key_material = [0u8; 32];
-        argon2_instance()
-            .hash_password_into(
-                password.unsafe_inner().as_bytes(),
-                &decoded_symmetric_key_salt,
-                &mut symmetric_key_material,
-            )
-            .map_err(|e| anyhow!("{e}").context("Failed to generate symmetric key material"))?;
-
-        let aes_gcm_key = Key::<Aes256Gcm>::from_slice(&symmetric_key_material);
-        let cipher = Aes256Gcm::new(aes_gcm_key);
 
         let decoded_encrypted_private_key_nonce = BASE64_STANDARD
             .decode(self.encrypted_private_key_nonce.unsafe_inner())
@@ -167,8 +156,6 @@ impl SignUpRequestHttpBody {
         }
         let decoded_encrypted_private_key_nonce: [u8; 12] =
             slice_to_array(&decoded_encrypted_private_key_nonce);
-        let decoded_encrypted_private_key_nonce_aes_formatted =
-            Nonce::<Aes256Gcm>::from_slice(&decoded_encrypted_private_key_nonce);
 
         let decoded_encrypted_private_key = BASE64_STANDARD
             .decode(self.encrypted_private_key.unsafe_inner())
@@ -178,21 +165,6 @@ impl SignUpRequestHttpBody {
                     e
                 ))
             })?;
-
-        let decrypted_private_key = cipher
-            .decrypt(
-                decoded_encrypted_private_key_nonce_aes_formatted,
-                decoded_encrypted_private_key.as_ref(),
-            )
-            .map_err(|_| SignupRequestError::InvalidKeyPair)?;
-
-        if decrypted_private_key.len() != 32 {
-            return Err(SignupRequestError::InvalidKeyPair);
-        }
-        let decrypted_private_key: [u8; 32] = slice_to_array(&decrypted_private_key);
-
-        let ed25519_secret_key = SigningKey::from_bytes(&decrypted_private_key);
-        let ed25519_public_key = ed25519_secret_key.verifying_key();
 
         let decoded_public_key = BASE64_STANDARD
             .decode(self.public_key.unsafe_inner())
@@ -206,13 +178,26 @@ impl SignUpRequestHttpBody {
         }
         let decoded_public_key: [u8; 32] = slice_to_array(&decoded_public_key);
 
-        if ed25519_public_key.to_bytes().as_slice() != decoded_public_key.as_slice() {
+        if verify_key_material(
+            &password,
+            &decoded_symmetric_key_salt,
+            &decoded_encrypted_private_key_nonce,
+            &decoded_encrypted_private_key,
+            &decoded_public_key,
+        )
+        .is_err()
+        {
             return Err(SignupRequestError::InvalidKeyPair);
         }
 
+        // Verification token is a base64url-encoded random 32-byte value
+        let verification_ticket_token: [u8; 32] = rand::random();
+
+        let verification_ticket_lifetime = chrono::Duration::minutes(15);
+
         let password_hash = password
             .hash()
-            .map_err(|e| anyhow!("{e}").context("Failed to hash password"))?;
+            .map_err(|e| e.context("Failed to hash password"))?;
 
         Ok(SignupRequest::new(
             email,
@@ -221,8 +206,55 @@ impl SignUpRequestHttpBody {
             Opaque::new(decoded_encrypted_private_key_nonce),
             self.encrypted_private_key,
             Opaque::new(decoded_public_key),
+            verification_ticket_token.into(),
+            verification_ticket_lifetime,
         ))
     }
+}
+
+fn verify_key_material(
+    password: &Password,
+    symmetric_key_salt: &[u8; 16],
+    encrypted_private_key_nonce: &[u8; 12],
+    encrypted_private_key: &[u8],
+    public_key: &[u8; 32],
+) -> Result<(), anyhow::Error> {
+    let mut symmetric_key_material = [0u8; 32];
+    argon2_instance()
+        .hash_password_into(
+            password.unsafe_inner().as_bytes(),
+            symmetric_key_salt,
+            &mut symmetric_key_material,
+        )
+        .map_err(|e| anyhow!("{e}").context("Failed to generate symmetric key material"))?;
+
+    let aes_gcm_key = Key::<Aes256Gcm>::from_slice(&symmetric_key_material);
+    let cipher = Aes256Gcm::new(aes_gcm_key);
+
+    let encrypted_private_key_nonce_aes_formatted =
+        Nonce::<Aes256Gcm>::from_slice(encrypted_private_key_nonce);
+
+    let decrypted_private_key = cipher
+        .decrypt(
+            encrypted_private_key_nonce_aes_formatted,
+            encrypted_private_key,
+        )
+        .map_err(|_| SignupRequestError::InvalidKeyPair)?;
+
+    if decrypted_private_key.len() != 32 {
+        return Err(anyhow!("Invalid decrypted private key length"));
+    }
+
+    let decrypted_private_key: [u8; 32] = slice_to_array(&decrypted_private_key);
+
+    let ed25519_secret_key = SigningKey::from_bytes(&decrypted_private_key);
+    let ed25519_public_key = ed25519_secret_key.verifying_key();
+
+    if ed25519_public_key.to_bytes().as_slice() != public_key.as_slice() {
+        return Err(anyhow!("Public key does not match decrypted private key"));
+    }
+
+    Ok(())
 }
 
 fn slice_to_array<const N: usize>(slice: &[u8]) -> [u8; N] {
@@ -384,6 +416,9 @@ mod tests {
                 .verify(signup_request.password_hash.unsafe_inner())
                 .is_ok()
         );
+
+        assert!(!signup_request.verification_ticket_token.unsafe_inner().is_empty());
+        assert!(signup_request.verification_ticket_expires_at > chrono::Utc::now());
     }
 
     #[test]

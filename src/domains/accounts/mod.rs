@@ -1,4 +1,5 @@
 use crate::newtypes::{Email, Opaque};
+use base64::{Engine, prelude::BASE64_URL_SAFE};
 use sqlx::prelude::FromRow;
 use thiserror::Error;
 
@@ -23,6 +24,18 @@ pub struct Account {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Clone, FromRow)]
+pub struct VerificationTicket {
+    pub id: uuid::Uuid,
+    pub account_id: uuid::Uuid,
+    pub token: Opaque<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub cancelled_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub used_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 // #######################################
 // ############### SIGN UP ###############
 // #######################################
@@ -34,6 +47,8 @@ pub struct SignupRequest {
     pub encrypted_private_key_nonce: Opaque<[u8; 12]>,
     pub encrypted_private_key: Opaque<String>,
     pub public_key: Opaque<[u8; 32]>,
+    pub verification_ticket_token: Opaque<String>,
+    pub verification_ticket_expires_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Error)]
@@ -57,6 +72,7 @@ pub enum SignupRequestError {
 }
 
 impl SignupRequest {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         email: Email,
         password_hash: Opaque<String>,
@@ -64,7 +80,13 @@ impl SignupRequest {
         encrypted_private_key_nonce: Opaque<[u8; 12]>,
         encrypted_private_key: Opaque<String>,
         public_key: Opaque<[u8; 32]>,
+        verification_ticket_token: Opaque<[u8; 32]>,
+        verification_ticket_lifetime: chrono::Duration,
     ) -> Self {
+        let verification_ticket_token =
+            BASE64_URL_SAFE.encode(verification_ticket_token.unsafe_inner());
+        let verification_ticket_expires_at = chrono::Utc::now() + verification_ticket_lifetime;
+
         SignupRequest {
             email,
             password_hash,
@@ -72,6 +94,8 @@ impl SignupRequest {
             encrypted_private_key_nonce,
             encrypted_private_key,
             public_key,
+            verification_ticket_token: verification_ticket_token.into(),
+            verification_ticket_expires_at,
         }
     }
 }

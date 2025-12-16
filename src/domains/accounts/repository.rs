@@ -1,18 +1,20 @@
+use anyhow::anyhow;
 use sqlx::{Pool, Postgres, query_as};
 
-use super::{Account, CreateAccountError, GetAccountError, SignupRequest};
+use super::{Account, CreateAccountError, GetAccountError, SignupRequest, VerificationTicket};
 use crate::newtypes::Email;
 
 /// Defines the AccountsRepository trait for account-related database operations.
 #[async_trait::async_trait]
 pub trait AccountsRepository: Send + Sync + 'static {
-    /// Creates a new [Account] in the repository.
+    /// Creates a new [Account] in the repository. Creates a new [VerificationTicket] as part of the process.
     ///
     /// # Arguments
-    /// * `signup_request` - A reference to the [SignupRequest] containing account details.
+    /// * `signup_request` - A reference to the [SignupRequest] containing account and ticket details.
     ///
     /// # Returns
     /// * `Account` - The created [Account].
+    /// * `VerificationTicket` - The created [VerificationTicket].
     ///
     /// # Errors
     /// - MUST return [CreateAccountError::EmailAlreadyCreated] if an account with the given email already exists.
@@ -20,7 +22,7 @@ pub trait AccountsRepository: Send + Sync + 'static {
     async fn create_account(
         &self,
         signup_request: &SignupRequest,
-    ) -> Result<Account, CreateAccountError>;
+    ) -> Result<(Account, VerificationTicket), CreateAccountError>;
 
     /// Retrieves an [Account] by its email.
     ///
@@ -52,7 +54,13 @@ impl AccountsRepository for PsqlAccountsRepository {
     async fn create_account(
         &self,
         signup_request: &SignupRequest,
-    ) -> Result<Account, CreateAccountError> {
+    ) -> Result<(Account, VerificationTicket), CreateAccountError> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| anyhow!(e).context("failed to start transaction"))?;
+
         let account = query_as::<_, Account>(
             r#"
             INSERT INTO account (
@@ -81,20 +89,52 @@ impl AccountsRepository for PsqlAccountsRepository {
         .bind(&signup_request.encrypted_private_key_nonce)
         .bind(&signup_request.encrypted_private_key)
         .bind(&signup_request.public_key)
-        .fetch_one(&self.pool)
-        .await;
-        match account {
-            Ok(account) => Ok(account),
-            Err(sqlx::Error::Database(db_err))
-                if db_err.code() == Some("23505".into()) && db_err.message().contains("email") =>
-            {
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|e| {
+            if let sqlx::Error::Database(db_err) = &e
                 // 23505 is the PostgreSQL error code for unique_violation
-                Err(CreateAccountError::EmailAlreadyCreated)
+                && db_err.code() == Some("23505".into())
+                && db_err.message().contains("email")
+            {
+                CreateAccountError::EmailAlreadyCreated
+            } else {
+                anyhow::Error::new(e).context("creating account").into()
             }
-            Err(e) => Err(CreateAccountError::Unknown(
-                anyhow::Error::new(e).context("creating account"),
-            )),
-        }
+        })?;
+
+        let verification_ticket = query_as::<_, VerificationTicket>(
+            r#"
+            INSERT INTO verification_ticket (
+                account_id,
+                token,
+                expires_at
+            ) VALUES ($1, $2, $3)
+             RETURNING
+                id,
+                account_id,
+                token,
+                expires_at,
+                created_at,
+                expires_at,
+                cancelled_at,
+                used_at,
+                updated_at
+        "#,
+        )
+        .bind(account.id)
+        .bind(&signup_request.verification_ticket_token)
+        .bind(signup_request.verification_ticket_expires_at)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|e| anyhow!(e).context("failed to create verification ticket"))?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|e| anyhow!(e).context("failed to commit transaction"))?;
+
+        Ok((account, verification_ticket))
     }
 
     async fn get_account_by_email(&self, email: &Email) -> Result<Account, GetAccountError> {
