@@ -24,9 +24,9 @@ use fake::{Dummy, Fake, Faker, rand};
 use serde::{Deserialize, Serialize};
 
 use crate::domains::accounts::{
-    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, SignupRequest,
-    SignupRequestError, UseVerificationTicketError, UseVerificationTicketRequest,
-    UseVerificationTicketRequestError, VerificationTicket,
+    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginRequest,
+    LoginRequestError, SignupRequest, SignupRequestError, UseVerificationTicketError,
+    UseVerificationTicketRequest, UseVerificationTicketRequestError, VerificationTicket,
 };
 use tracing::info;
 
@@ -34,6 +34,7 @@ pub fn accounts_router() -> Router<AppState> {
     Router::new()
         .route("/signup", post(sign_up))
         .route("/verification-tickets/use", post(use_verification_ticket))
+        .route("/login", post(login))
         // Added a test route for checking user existence
         .route("/{email}/test-exists", get(test_user_exists))
 }
@@ -316,21 +317,18 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AccountResponse {
-    pub id: uuid::Uuid,
+pub struct AccountResponse {
     pub email: String,
     pub symmetric_key_salt: Opaque<String>,
     pub encrypted_private_key_nonce: Opaque<String>,
     pub encrypted_private_key: Opaque<String>,
     pub public_key: Opaque<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl From<Account> for AccountResponse {
     fn from(account: Account) -> Self {
         AccountResponse {
-            id: account.id,
             email: account.email.to_string(),
             symmetric_key_salt: BASE64_STANDARD
                 .encode(account.symmetric_key_salt.unsafe_inner())
@@ -343,7 +341,6 @@ impl From<Account> for AccountResponse {
                 .encode(account.public_key.unsafe_inner())
                 .into(),
             created_at: account.created_at,
-            updated_at: account.updated_at,
         }
     }
 }
@@ -461,6 +458,89 @@ impl UseVerificationTicketRequestHttpBody {
             verification_ticket.id,
         ))
     }
+}
+
+// #####################################
+// ############### LOGIN ###############
+// #####################################
+
+async fn login(
+    State(app_state): State<AppState>,
+    Json(body): Json<LoginRequestHttpBody>,
+) -> Result<(StatusCode, Json<LoginResponse>), ApiError> {
+    let email = Email::new(&body.email).map_err(|e| match e {
+        EmailError::Empty => ApiError::BadRequest("Email cannot be empty".to_string()),
+        EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
+    })?;
+    let account = app_state
+        .accounts_repository
+        .find_account_by_email(&email)
+        .await
+        .map_err(|e| match e {
+            FindAccountError::NotFound => {
+                ApiError::BadRequest("Invalid email or password".to_string())
+            }
+            FindAccountError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    let login_request = body.try_into_domain(&account).map_err(|e| match e {
+        LoginRequestError::InvalidPassword => {
+            ApiError::BadRequest("Invalid email or password".to_string())
+        }
+        LoginRequestError::InvalidPasswordFormat(msg) => {
+            ApiError::BadRequest(format!("invalid password format: {msg}"))
+        }
+        LoginRequestError::Unknown(err) => ApiError::InternalServerError(err),
+    })?;
+
+    // REMIND ME
+    // - Store last login time
+    // - Add notifier
+
+    Ok((
+        StatusCode::OK,
+        Json(LoginResponse {
+            access_token: login_request.access_token,
+        }),
+    ))
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LoginRequestHttpBody {
+    pub email: String,
+    pub password: Opaque<String>,
+}
+
+impl LoginRequestHttpBody {
+    fn try_into_domain(self, account: &Account) -> Result<LoginRequest, LoginRequestError> {
+        let password = Password::new(self.password.unsafe_inner()).map_err(|e| match e {
+            PasswordError::Empty => {
+                LoginRequestError::InvalidPasswordFormat("Password cannot be empty".to_string())
+            }
+            PasswordError::InvalidPassword(reason) => {
+                LoginRequestError::InvalidPasswordFormat(reason)
+            }
+        })?;
+
+        if password
+            .verify(account.password_hash.unsafe_inner())
+            .is_err()
+        {
+            return Err(LoginRequestError::InvalidPassword);
+        }
+
+        // REMIND ME
+        // Generate access token (for simplicity, using a random 32-byte value here)
+        let access_token_bytes: [u8; 32] = rand::random();
+        let access_token_b64 = BASE64_URL_SAFE.encode(access_token_bytes);
+
+        Ok(LoginRequest::new(account.id, Opaque::new(access_token_b64)))
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct LoginResponse {
+    pub access_token: Opaque<String>,
 }
 
 // ##############################################################

@@ -149,6 +149,34 @@ pub enum UseVerificationTicketError {
     Unknown(#[from] anyhow::Error),
 }
 
+// #############################################
+// ############### ACCOUNT LOGIN ###############
+// #############################################
+
+pub struct LoginRequest {
+    pub account_id: uuid::Uuid,
+    pub access_token: Opaque<String>,
+}
+
+impl LoginRequest {
+    pub fn new(account_id: uuid::Uuid, access_token: Opaque<String>) -> Self {
+        LoginRequest {
+            account_id,
+            access_token,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum LoginRequestError {
+    #[error("Invalid password format: {0}")]
+    InvalidPasswordFormat(String),
+    #[error("Password hash does not match")]
+    InvalidPassword,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
 // #################################################
 // ############### ACCOUNT RETRIEVAL ###############
 // #################################################
