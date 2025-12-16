@@ -15,7 +15,10 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
-use base64::{Engine, prelude::BASE64_STANDARD};
+use base64::{
+    Engine,
+    prelude::{BASE64_STANDARD, BASE64_URL_SAFE},
+};
 use ed25519_dalek::SigningKey;
 use fake::{Dummy, Fake, Faker, rand};
 use serde::{Deserialize, Serialize};
@@ -430,7 +433,26 @@ impl UseVerificationTicketRequestHttpBody {
             return Err(UseVerificationTicketRequestError::Expired);
         }
 
-        if verification_ticket.token.unsafe_inner() != self.token.unsafe_inner() {
+        // Constant time comparison to prevent timing attacks
+        let decoded_input = BASE64_URL_SAFE
+            .decode(self.token.unsafe_inner())
+            .map_err(|_| UseVerificationTicketRequestError::InvalidToken)?;
+        let decoded_stored = BASE64_URL_SAFE
+            .decode(verification_ticket.token.unsafe_inner())
+            .map_err(|_| UseVerificationTicketRequestError::InvalidToken)?;
+
+        let compared_input = if decoded_input.len() != decoded_stored.len() {
+            // If lengths differ, create a dummy vector of the same length as stored token
+            vec![0u8; decoded_stored.len()]
+        } else {
+            decoded_input
+        };
+        let equal_side_by_side = compared_input
+            .iter()
+            .zip(decoded_stored.iter())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0;
+        if !equal_side_by_side {
             return Err(UseVerificationTicketRequestError::InvalidToken);
         }
 
