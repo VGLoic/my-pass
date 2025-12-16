@@ -220,7 +220,6 @@ impl AccountsRepository for PsqlAccountsRepository {
                 vt.id,
                 vt.account_id,
                 vt.token,
-                vt.expires_at,
                 vt.created_at,
                 vt.expires_at,
                 vt.cancelled_at,
@@ -282,20 +281,20 @@ impl AccountsRepository for PsqlAccountsRepository {
                     token: row
                         .try_get(12)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket token"))?,
-                    expires_at: row
-                        .try_get(13)
-                        .map_err(|e| anyhow::Error::new(e).context("parsing ticket expires_at"))?,
                     created_at: row
-                        .try_get(14)
+                        .try_get(13)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket created_at"))?,
-                    cancelled_at: row.try_get(16).map_err(|e| {
+                    expires_at: row
+                        .try_get(14)
+                        .map_err(|e| anyhow::Error::new(e).context("parsing ticket expires_at"))?,
+                    cancelled_at: row.try_get(15).map_err(|e| {
                         anyhow::Error::new(e).context("parsing ticket cancelled_at")
                     })?,
                     used_at: row
-                        .try_get(17)
+                        .try_get(16)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket used_at"))?,
                     updated_at: row
-                        .try_get(18)
+                        .try_get(17)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket updated_at"))?,
                 };
 
