@@ -199,16 +199,16 @@ mod tests {
             sub: "not-a-uuid".to_string(),
             aud: AUDIENCE.to_string(),
             exp: (chrono::Utc::now() + chrono::Duration::seconds(3600)).timestamp(),
-            nbf: (chrono::Utc::now() + chrono::Duration::seconds(70)).timestamp(), // not valid for another 70 seconds, taking leeway into account
+            nbf: chrono::Utc::now().timestamp(),
         };
         let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
-        let not_yet_valid_token = jsonwebtoken::encode(
+        let invalid_sub_token = jsonwebtoken::encode(
             &header,
             &claims,
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
         .expect("failed to encode not yet valid JWT");
-        let result = decode_jwt(&not_yet_valid_token.into(), &secret);
+        let result = decode_jwt(&invalid_sub_token.into(), &secret);
         assert!(result.is_err());
     }
 
@@ -225,16 +225,16 @@ mod tests {
         let claims = InvalidClaims {
             aud: AUDIENCE.to_string(),
             exp: (chrono::Utc::now() + chrono::Duration::seconds(3600)).timestamp(),
-            nbf: (chrono::Utc::now() + chrono::Duration::seconds(70)).timestamp(), // not valid for another 70 seconds, taking leeway into account
+            nbf: chrono::Utc::now().timestamp(),
         };
         let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
-        let not_yet_valid_token = jsonwebtoken::encode(
+        let missing_sub_token = jsonwebtoken::encode(
             &header,
             &claims,
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
         .expect("failed to encode not yet valid JWT");
-        let result = decode_jwt(&not_yet_valid_token.into(), &secret);
+        let result = decode_jwt(&missing_sub_token.into(), &secret);
         assert!(result.is_err());
     }
 }
