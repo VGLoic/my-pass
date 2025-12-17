@@ -540,6 +540,9 @@ impl LoginRequestHttpBody {
                 LoginRequestError::InvalidPasswordFormat(reason)
             }
         })?;
+        if !account.verified {
+            return Err(LoginRequestError::AccountNotVerified);
+        }
 
         if password
             .verify(account.password_hash.unsafe_inner())
@@ -548,9 +551,6 @@ impl LoginRequestHttpBody {
             return Err(LoginRequestError::InvalidPassword);
         }
 
-        if !account.verified {
-            return Err(LoginRequestError::AccountNotVerified);
-        }
 
         let access_token = jwt::encode_jwt(account.id, &jwt_secret).map_err(|e| {
             LoginRequestError::Unknown(anyhow::Error::new(e).context("failed to generate token"))
