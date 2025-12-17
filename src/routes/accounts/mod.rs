@@ -551,7 +551,6 @@ impl LoginRequestHttpBody {
             return Err(LoginRequestError::InvalidPassword);
         }
 
-
         let access_token = jwt::encode_jwt(account.id, &jwt_secret).map_err(|e| {
             LoginRequestError::Unknown(anyhow::Error::new(e).context("failed to generate token"))
         })?;
@@ -903,6 +902,80 @@ mod tests {
         match result.err().unwrap() {
             UseVerificationTicketRequestError::Expired => {}
             _ => panic!("Expected Expired error"),
+        };
+    }
+
+    #[test]
+    fn test_valid_login_request() {
+        let password = Faker.fake::<Password>();
+        let mut account = fake_account();
+        account.password_hash = password.hash().unwrap().into();
+        account.verified = true;
+        let http_request = LoginRequestHttpBody {
+            email: account.email.to_string(),
+            password: password.unsafe_inner().to_owned().into(),
+        };
+        let jwt_secret = Opaque::new(Faker.fake::<String>());
+        let result = http_request.try_into_domain(&account, jwt_secret.clone());
+        assert!(result.is_ok());
+        let login_request = result.unwrap();
+        assert_eq!(login_request.account_id, account.id);
+        assert!(jwt::decode_jwt(&login_request.access_token, &jwt_secret).is_ok());
+    }
+
+    #[test]
+    fn test_unverified_account_login_request() {
+        let password = Faker.fake::<Password>();
+        let mut account = fake_account();
+        account.password_hash = password.hash().unwrap().into();
+        account.verified = false;
+        let http_request = LoginRequestHttpBody {
+            email: account.email.to_string(),
+            password: password.unsafe_inner().to_owned().into(),
+        };
+        let jwt_secret = Opaque::new(Faker.fake::<String>());
+        let result = http_request.try_into_domain(&account, jwt_secret.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            LoginRequestError::AccountNotVerified => {}
+            _ => panic!("Expected AccountNotVerified error"),
+        };
+    }
+
+    #[test]
+    fn test_invalid_password_format_login_request() {
+        let password = Faker.fake::<Password>();
+        let mut account = fake_account();
+        account.password_hash = password.hash().unwrap().into();
+        account.verified = true;
+        let http_request = LoginRequestHttpBody {
+            email: account.email.to_string(),
+            password: Opaque::new("".to_string()), // Empty password
+        };
+        let jwt_secret = Opaque::new(Faker.fake::<String>());
+        let result = http_request.try_into_domain(&account, jwt_secret.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            LoginRequestError::InvalidPasswordFormat(_) => {}
+            _ => panic!("Expected InvalidPasswordFormat error"),
+        };
+    }
+
+    #[test]
+    fn test_invalid_password_login_request() {
+        let mut account = fake_account();
+        account.verified = true;
+        let password = Faker.fake::<Password>();
+        let http_request = LoginRequestHttpBody {
+            email: account.email.to_string(),
+            password: password.unsafe_inner().to_owned().into(),
+        };
+        let jwt_secret = Opaque::new(Faker.fake::<String>());
+        let result = http_request.try_into_domain(&account, jwt_secret.clone());
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            LoginRequestError::InvalidPassword => {}
+            _ => panic!("Expected InvalidPassword error"),
         };
     }
 
