@@ -179,7 +179,7 @@ mod tests {
             &claims,
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
-        .expect("failed to encode not yet valid JWT");
+        .expect("failed to encode jwt");
         let result = decode_jwt(&not_yet_valid_token.into(), &secret);
         assert!(result.is_err());
     }
@@ -207,7 +207,7 @@ mod tests {
             &claims,
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
-        .expect("failed to encode not yet valid JWT");
+        .expect("failed to encode jwt");
         let result = decode_jwt(&invalid_sub_token.into(), &secret);
         assert!(result.is_err());
     }
@@ -233,7 +233,7 @@ mod tests {
             &claims,
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
-        .expect("failed to encode not yet valid JWT");
+        .expect("failed to encode jwt");
         let result = decode_jwt(&missing_sub_token.into(), &secret);
         assert!(result.is_err());
     }
