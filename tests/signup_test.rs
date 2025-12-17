@@ -27,20 +27,6 @@ async fn test_signup() {
         StatusCode::CREATED
     );
 
-    assert_eq!(
-        instance_state
-            .reqwest_client
-            .get(format!(
-                "{}/api/accounts/{}/test-exists",
-                &instance_state.server_url, signup_body.email
-            ))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::OK
-    );
-
     let verification_tickets = instance_state
         .accounts_notifier
         .get_signed_up_tickets(&signup_body.email);

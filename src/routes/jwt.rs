@@ -28,18 +28,17 @@ pub fn encode_jwt(
     .map_err(|e| JwtEncodeError::Unknown(anyhow::Error::new(e).context("failed to encode token")))
 }
 
-// REMIND ME: remove allow dead code once used
-#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum JwtDecodeError {
     #[error(transparent)]
     InvalidToken(#[from] anyhow::Error),
 }
 
-/// Decodes the given JWT token using the provided secret and returns the account ID if valid.
-// REMIND ME: remove allow dead code once used
-#[allow(dead_code)]
-pub fn decode_jwt(token: &Opaque<String>, secret: &Opaque<String>) -> Result<Uuid, JwtDecodeError> {
+/// Decodes the given JWT token using the provided secret, validates it and returns the account ID if valid.
+pub fn decode_and_validate_jwt(
+    token: &Opaque<String>,
+    secret: &Opaque<String>,
+) -> Result<Uuid, JwtDecodeError> {
     let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
     validation.set_audience(&[AUDIENCE.to_string()]);
     validation.validate_exp = true;
@@ -96,7 +95,8 @@ mod tests {
         let account_id = Uuid::new_v4();
         let secret: Opaque<String> = Opaque::new(TEST_SECRET.to_string());
         let token = encode_jwt(account_id, &secret).expect("failed to encode JWT");
-        let decoded_account_id = decode_jwt(&token, &secret).expect("failed to decode JWT");
+        let decoded_account_id =
+            decode_and_validate_jwt(&token, &secret).expect("failed to decode JWT");
         assert_eq!(account_id, decoded_account_id);
     }
 
@@ -104,7 +104,7 @@ mod tests {
     fn test_jwt_decode_invalid_token() {
         let secret: Opaque<String> = Opaque::new(TEST_SECRET.to_string());
         let invalid_token: Opaque<String> = Opaque::new("invalid.token.here".to_string());
-        let result = decode_jwt(&invalid_token, &secret);
+        let result = decode_and_validate_jwt(&invalid_token, &secret);
         assert!(result.is_err());
     }
 
@@ -114,7 +114,7 @@ mod tests {
         let secret: Opaque<String> = Opaque::new(TEST_SECRET.to_string());
         let token = encode_jwt(account_id, &secret).expect("failed to encode JWT");
         let wrong_secret: Opaque<String> = Opaque::new("wrong-secret".to_string());
-        let result = decode_jwt(&token, &wrong_secret);
+        let result = decode_and_validate_jwt(&token, &wrong_secret);
         assert!(result.is_err());
     }
 
@@ -136,7 +136,7 @@ mod tests {
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
         .expect("failed to encode modified JWT");
-        let result = decode_jwt(&wrong_token.into(), &secret);
+        let result = decode_and_validate_jwt(&wrong_token.into(), &secret);
         assert!(result.is_err());
     }
 
@@ -158,7 +158,7 @@ mod tests {
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
         .expect("failed to encode expired JWT");
-        let result = decode_jwt(&expired_token.into(), &secret);
+        let result = decode_and_validate_jwt(&expired_token.into(), &secret);
         assert!(result.is_err());
     }
 
@@ -180,7 +180,7 @@ mod tests {
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
         .expect("failed to encode jwt");
-        let result = decode_jwt(&not_yet_valid_token.into(), &secret);
+        let result = decode_and_validate_jwt(&not_yet_valid_token.into(), &secret);
         assert!(result.is_err());
     }
 
@@ -208,7 +208,7 @@ mod tests {
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
         .expect("failed to encode jwt");
-        let result = decode_jwt(&invalid_sub_token.into(), &secret);
+        let result = decode_and_validate_jwt(&invalid_sub_token.into(), &secret);
         assert!(result.is_err());
     }
 
@@ -234,7 +234,7 @@ mod tests {
             &jsonwebtoken::EncodingKey::from_secret(secret.unsafe_inner().as_bytes()),
         )
         .expect("failed to encode jwt");
-        let result = decode_jwt(&missing_sub_token.into(), &secret);
+        let result = decode_and_validate_jwt(&missing_sub_token.into(), &secret);
         assert!(result.is_err());
     }
 }

@@ -4,7 +4,7 @@ use fake::{Fake, Faker};
 mod common;
 use common::{default_test_config, setup_instance};
 use my_pass::routes::accounts::{
-    LoginRequestHttpBody, LoginResponse, SignUpRequestHttpBody,
+    LoginRequestHttpBody, LoginResponse, MeResponse, SignUpRequestHttpBody,
     UseVerificationTicketRequestHttpBody,
 };
 
@@ -78,6 +78,34 @@ async fn test_login() {
             .get_logins(&signup_body.email)
             .len()
             == 1
+    );
+
+    let access_token = response_body.access_token;
+    let me_response = instance_state
+        .reqwest_client
+        .get(format!("{}/api/accounts/me", &instance_state.server_url))
+        .bearer_auth(access_token.unsafe_inner())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(me_response.status(), StatusCode::OK);
+    let me_response_body = me_response.json::<MeResponse>().await.unwrap();
+    assert_eq!(me_response_body.email, signup_body.email);
+    assert_eq!(
+        me_response_body.encrypted_private_key.unsafe_inner(),
+        signup_body.encrypted_private_key.unsafe_inner()
+    );
+    assert_eq!(
+        me_response_body.symmetric_key_salt.unsafe_inner(),
+        signup_body.symmetric_key_salt.unsafe_inner()
+    );
+    assert_eq!(
+        me_response_body.encrypted_private_key_nonce.unsafe_inner(),
+        signup_body.encrypted_private_key_nonce.unsafe_inner()
+    );
+    assert_eq!(
+        me_response_body.public_key.unsafe_inner(),
+        signup_body.public_key.unsafe_inner()
     );
 }
 

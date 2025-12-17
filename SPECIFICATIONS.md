@@ -8,9 +8,10 @@ MyPass is a password management application designed to securely store and manag
 
 1. As a user, I want to sign up for an account with an email and a password, on successful signup I should receive a verification email.
 2. As a signed up user, I want to verify my email address by clicking on a link in the verification email.
-3. As a user, I want to log in to my account using my verified email and password.
-4. As a logged in and non verified user, I want to ask for a new verification email if the previous one has expired.
-5. As a logged in verified user, I want to manage my vault:
+3. As a non verified user, I want to ask for a new verification email if the previous one has expired.
+4. As a verified user, I want to log in to my account using my verified email and password.
+5. As a logged in user, I want to retrieve my account information.
+6. As a logged in verified user, I want to manage my vault:
     - add new items,
     - edit existing items,
     - delete items,
@@ -25,7 +26,7 @@ MyPass is a password management application designed to securely store and manag
 
 - Password and key derivation: Argon2id,
 - Symmetric encryption (with authentication): AES-256-GCM,
-- Message authentication: HMAC-SHA3-256,
+- Message authentication: HMAC-SHA-256,
 - Asymmetric encryption: Ed25519 curve with EdDSA signature scheme.
 
 ## Implementation of the user stories
@@ -108,7 +109,32 @@ Response:
 - On success: HTTP 200 OK,
 - On failure: appropriate HTTP error code with message.
 
-### 3. User Login
+### 3. Resend Verification Email
+
+**Client Side:**
+- The user fills out a login form with their email and password,
+- The client sends a request to the server using the endpoint described below with their email and password.
+
+**Server Side:**
+Endpoint: `POST /api/accounts/verification-tickets/resend`
+
+Handler logic:
+1. Validate the email and password format,
+2. Retrieve the account associated with the email from the database,
+3. Verify the password against the stored hashed password using Argon2id,
+4. Verify that the account email is not verified,
+5. Check if the last ticket has not been sent less than 5 minutes ago,
+6. Generate a new verification token, it is valid for 15 minutes,
+7. In database:
+    - if previous verification ticket exists and is still valid, update its invalidation timestamp,
+    - creates a new verification ticket with the new token and the current timestamp,
+8. Sends a verification email to the user with a link containing the new verification token.
+
+Response:
+- On success: HTTP 200 OK,
+- On failure: appropriate HTTP error code with message.
+
+### 4. User Login
 
 **Client Side:**
 - The user fills out a login form with their email and password,
@@ -150,36 +176,24 @@ Response:
 ```
 - On failure: appropriate HTTP error code with message.
 
-
-### 4. Resend Verification Email
+### 5. Retrieve Account Information
 
 **Client Side:**
-- The user fills out a login form with their email and password,
-- The client sends a request to the server using the endpoint described below with their email and password.
+- The user must be logged in,
+- The client sends a request to the server using the endpoint described below with the JWT access token in the Authorization header.
 
 **Server Side:**
-Endpoint: `POST /api/accounts/verification-tickets/resend`
-
+Endpoint: `GET /api/accounts/me` with Authorization header:
+```Authorization: Bearer <jwt_access_token>```
 Handler logic:
-1. Validate the email and password format,
-2. Retrieve the account associated with the email from the database,
-3. Verify the password against the stored hashed password using Argon2id,
-4. Verify that the account email is not verified,
-5. Check if the last ticket has not been sent less than 5 minutes ago,
-6. Generate a new verification token, it is valid for 15 minutes,
-7. In database:
-    - if previous verification ticket exists and is still valid, update its invalidation timestamp,
-    - creates a new verification ticket with the new token and the current timestamp,
-8. Sends a verification email to the user with a link containing the new verification token.
+1. Validate the JWT access token,
+2. Retrieve the account associated with the token from the database,
+3. Return to the client the account information containing its key materials.
 
-Response:
-- On success: HTTP 200 OK,
-- On failure: appropriate HTTP error code with message.
-
-### 5. Vault Management - Item creation
+### 6. Vault Management - Item creation
 
 **Client Side:**
-- The user must be logged in and verified,
+- The user must be logged in,
 - The client encrypts the item data before sending it to the server:
     1. Derives a shared using X25519 key exchange between an ephemeral key pair and the user's public key:
         1. Generates a random Ed25519 secret key,
