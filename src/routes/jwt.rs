@@ -12,6 +12,7 @@ pub enum JwtEncodeError {
     Unknown(#[from] anyhow::Error),
 }
 
+/// Encodes a JWT token for the given account ID using the provided secret.
 pub fn encode_jwt(
     account_id: Uuid,
     secret: &Opaque<String>,
@@ -27,12 +28,17 @@ pub fn encode_jwt(
     .map_err(|e| JwtEncodeError::Unknown(anyhow::Error::new(e).context("failed to encode token")))
 }
 
+// REMIND ME: remove allow dead code once used
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum JwtDecodeError {
     #[error(transparent)]
     InvalidToken(#[from] anyhow::Error),
 }
 
+/// Decodes the given JWT token using the provided secret and returns the account ID if valid.
+// REMIND ME: remove allow dead code once used
+#[allow(dead_code)]
 pub fn decode_jwt(token: Opaque<&str>, secret: Opaque<&str>) -> Result<Uuid, JwtDecodeError> {
     let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
     validation.set_audience(&[AUDIENCE.to_string()]);
