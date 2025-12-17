@@ -390,7 +390,7 @@ impl AccountsRepository for PsqlAccountsRepository {
     }
 
     async fn record_login(&self, account_id: uuid::Uuid) -> Result<(), LoginError> {
-        query(
+        let result = query(
             r#"
             UPDATE account
             SET last_login_at = NOW()
@@ -401,6 +401,12 @@ impl AccountsRepository for PsqlAccountsRepository {
         .execute(&self.pool)
         .await
         .map_err(|e| anyhow!(e).context("failed to register account login"))?;
+
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("no rows updated")
+                .context("account not found when registering login")
+                .into());
+        }
 
         Ok(())
     }
