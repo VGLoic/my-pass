@@ -174,6 +174,8 @@ pub enum LoginRequestError {
     InvalidPasswordFormat(String),
     #[error("Password hash does not match")]
     InvalidPassword,
+    #[error("Account is not verified")]
+    AccountNotVerified,
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
 }

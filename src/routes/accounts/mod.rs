@@ -493,6 +493,9 @@ async fn login(
             LoginRequestError::InvalidPasswordFormat(msg) => {
                 ApiError::BadRequest(format!("invalid password format: {msg}"))
             }
+            LoginRequestError::AccountNotVerified => {
+                ApiError::BadRequest("Account is not verified".to_string())
+            }
             LoginRequestError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
 
@@ -543,6 +546,10 @@ impl LoginRequestHttpBody {
             .is_err()
         {
             return Err(LoginRequestError::InvalidPassword);
+        }
+
+        if !account.verified {
+            return Err(LoginRequestError::AccountNotVerified);
         }
 
         let access_token = jwt::encode_jwt(account.id, &jwt_secret).map_err(|e| {
