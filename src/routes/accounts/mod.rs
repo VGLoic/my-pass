@@ -24,8 +24,8 @@ use fake::{Dummy, Fake, Faker, rand};
 use serde::{Deserialize, Serialize};
 
 use crate::domains::accounts::{
-    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginRequest,
-    LoginRequestError, SignupRequest, SignupRequestError, UseVerificationTicketError,
+    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginError,
+    LoginRequest, LoginRequestError, SignupRequest, SignupRequestError, UseVerificationTicketError,
     UseVerificationTicketRequest, UseVerificationTicketRequestError, VerificationTicket,
 };
 use tracing::info;
@@ -496,8 +496,14 @@ async fn login(
             LoginRequestError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
 
+    app_state
+        .accounts_repository
+        .record_login(account.id)
+        .await
+        .map_err(|e| match e {
+            LoginError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
     // REMIND ME
-    // - Store last login time
     // - Add notifier
 
     Ok((
@@ -907,6 +913,7 @@ mod tests {
             encrypted_private_key_nonce: Opaque::new(Faker.fake::<[u8; 12]>()),
             encrypted_private_key: Opaque::new(BASE64_STANDARD.encode(vec![0u8; 64])),
             public_key: Opaque::new(Faker.fake::<[u8; 32]>()),
+            last_login_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }

@@ -2,8 +2,8 @@ use anyhow::anyhow;
 use sqlx::{Pool, Postgres, Row, query, query_as};
 
 use super::{
-    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, SignupRequest,
-    UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
+    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginError,
+    SignupRequest, UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
 };
 use crate::newtypes::Email;
 
@@ -66,6 +66,15 @@ pub trait AccountsRepository: Send + Sync + 'static {
         &self,
         request: &UseVerificationTicketRequest,
     ) -> Result<(), UseVerificationTicketError>;
+
+    /// Records a login event for the specified account.
+    /// # Arguments
+    /// * `account_id` - The UUID of the account that has logged in.
+    /// # Returns
+    /// * `()` - Indicates successful recording of the login event.
+    /// # Errors
+    /// - MUST return [LoginError::Unknown] for any errors encountered during the login recording process.
+    async fn record_login(&self, account_id: uuid::Uuid) -> Result<(), LoginError>;
 }
 
 #[derive(Clone)]
@@ -110,6 +119,7 @@ impl AccountsRepository for PsqlAccountsRepository {
                 encrypted_private_key_nonce,
                 encrypted_private_key,
                 public_key,
+                last_login_at,
                 created_at,
                 updated_at
         "#,
@@ -182,6 +192,7 @@ impl AccountsRepository for PsqlAccountsRepository {
                 encrypted_private_key_nonce,
                 encrypted_private_key,
                 public_key,
+                last_login_at,
                 created_at,
                 updated_at
             FROM account
@@ -215,6 +226,7 @@ impl AccountsRepository for PsqlAccountsRepository {
                 a.encrypted_private_key_nonce,
                 a.encrypted_private_key,
                 a.public_key,
+                a.last_login_at,
                 a.created_at,
                 a.updated_at,
                 vt.id,
@@ -263,16 +275,19 @@ impl AccountsRepository for PsqlAccountsRepository {
                     public_key: row
                         .try_get(7)
                         .map_err(|e| anyhow::Error::new(e).context("parsing account public_key"))?,
+                    last_login_at: row.try_get(8).map_err(|e| {
+                        anyhow::Error::new(e).context("parsing account last_login_at")
+                    })?,
                     created_at: row
-                        .try_get(8)
+                        .try_get(9)
                         .map_err(|e| anyhow::Error::new(e).context("parsing account created_at"))?,
                     updated_at: row
-                        .try_get(9)
+                        .try_get(10)
                         .map_err(|e| anyhow::Error::new(e).context("parsing account updated_at"))?,
                 };
 
                 let verification_ticket_exists: Option<uuid::Uuid> =
-                    row.try_get(10).map_err(|e| {
+                    row.try_get(11).map_err(|e| {
                         anyhow::Error::new(e).context("checking verification ticket existence")
                     })?;
                 if verification_ticket_exists.is_none() {
@@ -281,28 +296,28 @@ impl AccountsRepository for PsqlAccountsRepository {
 
                 let ticket = VerificationTicket {
                     id: row
-                        .try_get(10)
+                        .try_get(11)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket id"))?,
                     account_id: row
-                        .try_get(11)
+                        .try_get(12)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket account_id"))?,
                     token: row
-                        .try_get(12)
+                        .try_get(13)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket token"))?,
                     created_at: row
-                        .try_get(13)
+                        .try_get(14)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket created_at"))?,
                     expires_at: row
-                        .try_get(14)
+                        .try_get(15)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket expires_at"))?,
-                    cancelled_at: row.try_get(15).map_err(|e| {
+                    cancelled_at: row.try_get(16).map_err(|e| {
                         anyhow::Error::new(e).context("parsing ticket cancelled_at")
                     })?,
                     used_at: row
-                        .try_get(16)
+                        .try_get(17)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket used_at"))?,
                     updated_at: row
-                        .try_get(17)
+                        .try_get(18)
                         .map_err(|e| anyhow::Error::new(e).context("parsing ticket updated_at"))?,
                 };
 
@@ -370,6 +385,22 @@ impl AccountsRepository for PsqlAccountsRepository {
             .commit()
             .await
             .map_err(|e| anyhow!(e).context("failed to commit transaction"))?;
+
+        Ok(())
+    }
+
+    async fn record_login(&self, account_id: uuid::Uuid) -> Result<(), LoginError> {
+        query(
+            r#"
+            UPDATE account
+            SET last_login_at = NOW()
+            WHERE id = $1
+        "#,
+        )
+        .bind(account_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow!(e).context("failed to register account login"))?;
 
         Ok(())
     }

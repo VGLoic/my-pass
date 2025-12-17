@@ -21,6 +21,7 @@ pub struct Account {
     pub encrypted_private_key_nonce: Opaque<[u8; 12]>,
     pub encrypted_private_key: Opaque<String>,
     pub public_key: Opaque<[u8; 32]>,
+    pub last_login_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -173,6 +174,12 @@ pub enum LoginRequestError {
     InvalidPasswordFormat(String),
     #[error("Password hash does not match")]
     InvalidPassword,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum LoginError {
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
 }
