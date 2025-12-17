@@ -14,7 +14,7 @@ pub enum JwtEncodeError {
 
 pub fn encode_jwt(
     account_id: Uuid,
-    secret: Opaque<&str>,
+    secret: &Opaque<String>,
 ) -> Result<Opaque<String>, JwtEncodeError> {
     let claims = Claims::new(account_id);
     let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);

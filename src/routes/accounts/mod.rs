@@ -10,7 +10,7 @@ use aes_gcm::{
 };
 use anyhow::anyhow;
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
@@ -30,11 +30,11 @@ use crate::domains::accounts::{
 };
 use tracing::info;
 
-pub fn accounts_router() -> Router<AppState> {
+pub fn accounts_router(jwt_secret: &Opaque<String>) -> Router<AppState> {
     Router::new()
         .route("/signup", post(sign_up))
         .route("/verification-tickets/use", post(use_verification_ticket))
-        .route("/login", post(login))
+        .route("/login", post(login).layer(Extension(jwt_secret.clone())))
         // Added a test route for checking user existence
         .route("/{email}/test-exists", get(test_user_exists))
 }
@@ -466,6 +466,7 @@ impl UseVerificationTicketRequestHttpBody {
 
 async fn login(
     State(app_state): State<AppState>,
+    Extension(jwt_secret): Extension<Opaque<String>>,
     Json(body): Json<LoginRequestHttpBody>,
 ) -> Result<(StatusCode, Json<LoginResponse>), ApiError> {
     let email = Email::new(&body.email).map_err(|e| match e {
@@ -483,15 +484,17 @@ async fn login(
             FindAccountError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
 
-    let login_request = body.try_into_domain(&account).map_err(|e| match e {
-        LoginRequestError::InvalidPassword => {
-            ApiError::BadRequest("Invalid email or password".to_string())
-        }
-        LoginRequestError::InvalidPasswordFormat(msg) => {
-            ApiError::BadRequest(format!("invalid password format: {msg}"))
-        }
-        LoginRequestError::Unknown(err) => ApiError::InternalServerError(err),
-    })?;
+    let login_request = body
+        .try_into_domain(&account, jwt_secret)
+        .map_err(|e| match e {
+            LoginRequestError::InvalidPassword => {
+                ApiError::BadRequest("Invalid email or password".to_string())
+            }
+            LoginRequestError::InvalidPasswordFormat(msg) => {
+                ApiError::BadRequest(format!("invalid password format: {msg}"))
+            }
+            LoginRequestError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
 
     // REMIND ME
     // - Store last login time
@@ -512,7 +515,11 @@ pub struct LoginRequestHttpBody {
 }
 
 impl LoginRequestHttpBody {
-    fn try_into_domain(self, account: &Account) -> Result<LoginRequest, LoginRequestError> {
+    fn try_into_domain(
+        self,
+        account: &Account,
+        jwt_secret: Opaque<String>,
+    ) -> Result<LoginRequest, LoginRequestError> {
         let password = Password::new(self.password.unsafe_inner()).map_err(|e| match e {
             PasswordError::Empty => {
                 LoginRequestError::InvalidPasswordFormat("Password cannot be empty".to_string())
@@ -529,8 +536,7 @@ impl LoginRequestHttpBody {
             return Err(LoginRequestError::InvalidPassword);
         }
 
-        let token_secret = "REMIND_ME_CHANGE_THIS_SECRET_KEY";
-        let access_token = jwt::encode_jwt(account.id, token_secret.into()).map_err(|e| {
+        let access_token = jwt::encode_jwt(account.id, &jwt_secret).map_err(|e| {
             LoginRequestError::Unknown(anyhow::Error::new(e).context("failed to generate token"))
         })?;
 

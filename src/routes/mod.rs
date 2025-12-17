@@ -9,12 +9,16 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-use crate::domains::accounts::{notifier::AccountsNotifier, repository::AccountsRepository};
+use crate::{
+    Config,
+    domains::accounts::{notifier::AccountsNotifier, repository::AccountsRepository},
+};
 
 pub mod accounts;
 mod jwt;
 
 pub fn app_router(
+    config: &Config,
     accounts_repository: impl AccountsRepository,
     accounts_notifier: impl AccountsNotifier,
 ) -> Router {
@@ -24,7 +28,10 @@ pub fn app_router(
     };
     Router::new()
         .route("/health", get(get_healthcheck))
-        .nest("/api/accounts", accounts::accounts_router())
+        .nest(
+            "/api/accounts",
+            accounts::accounts_router(&config.jwt_secret),
+        )
         .fallback(not_found)
         .with_state(app_state)
 }

@@ -35,6 +35,7 @@ pub fn default_test_config() -> Config {
         database_url: "postgresql://admin:admin@localhost:5433/mypass"
             .to_string()
             .into(),
+        jwt_secret: "my_jwt_secret_for_tests_only".to_string().into(),
     }
 }
 
@@ -69,7 +70,7 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
         my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool);
     let accounts_notifier = FakeAccountsNotifier::new();
 
-    let app = app_router(accounts_repository, accounts_notifier.clone()).layer(
+    let app = app_router(&config, accounts_repository, accounts_notifier.clone()).layer(
         TraceLayer::new_for_http()
             .make_span_with(|request: &Request<_>| {
                 let matched_path = request
