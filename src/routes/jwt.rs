@@ -37,6 +37,7 @@ pub fn decode_jwt(token: Opaque<&str>, secret: Opaque<&str>) -> Result<Uuid, Jwt
     let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
     validation.set_audience(&[AUDIENCE.to_string()]);
     validation.validate_exp = true;
+    validation.validate_nbf = true;
     validation.set_required_spec_claims(&["exp", "nbf", "sub", "aud"]);
     let token_data = jsonwebtoken::decode::<Claims>(
         token.unsafe_inner(),
