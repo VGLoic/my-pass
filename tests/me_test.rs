@@ -1,15 +1,16 @@
 use axum::http::StatusCode;
+use base64::{Engine, prelude::BASE64_STANDARD};
 use fake::{Fake, Faker};
 
 mod common;
 use common::{default_test_config, setup_instance};
 use my_pass::routes::accounts::{
-    LoginRequestHttpBody, LoginResponse, SignUpRequestHttpBody,
+    LoginRequestHttpBody, LoginResponse, MeResponse, SignUpRequestHttpBody,
     UseVerificationTicketRequestHttpBody,
 };
 
 #[tokio::test]
-async fn test_login() {
+async fn test_me() {
     let instance_state = setup_instance(default_test_config()).await.unwrap();
 
     let signup_body = Faker.fake::<SignUpRequestHttpBody>();
@@ -81,53 +82,47 @@ async fn test_login() {
     );
 
     let access_token = response_body.access_token;
+    let me_response = instance_state
+        .reqwest_client
+        .get(format!("{}/api/accounts/me", &instance_state.server_url))
+        .bearer_auth(access_token.unsafe_inner())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(me_response.status(), StatusCode::OK);
+    let me_response_body = me_response.json::<MeResponse>().await.unwrap();
+    assert_eq!(me_response_body.email, signup_body.email);
     assert_eq!(
-        instance_state
-            .reqwest_client
-            .get(format!("{}/api/accounts/me", &instance_state.server_url))
-            .bearer_auth(access_token.unsafe_inner())
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::OK
+        me_response_body.encrypted_private_key.unsafe_inner(),
+        signup_body.encrypted_private_key.unsafe_inner()
+    );
+    assert_eq!(
+        me_response_body.symmetric_key_salt.unsafe_inner(),
+        signup_body.symmetric_key_salt.unsafe_inner()
+    );
+    assert_eq!(
+        me_response_body.encrypted_private_key_nonce.unsafe_inner(),
+        signup_body.encrypted_private_key_nonce.unsafe_inner()
+    );
+    assert_eq!(
+        me_response_body.public_key.unsafe_inner(),
+        signup_body.public_key.unsafe_inner()
     );
 }
 
 #[tokio::test]
-async fn test_login_unverified_account() {
+async fn test_me_unauthorized() {
     let instance_state = setup_instance(default_test_config()).await.unwrap();
-    let signup_body = Faker.fake::<SignUpRequestHttpBody>();
 
     assert_eq!(
         instance_state
             .reqwest_client
-            .post(format!(
-                "{}/api/accounts/signup",
-                &instance_state.server_url
-            ))
-            .json(&signup_body)
+            .get(format!("{}/api/accounts/me", &instance_state.server_url))
+            .bearer_auth(BASE64_STANDARD.encode("invalid token"))
             .send()
             .await
             .unwrap()
             .status(),
-        StatusCode::CREATED
-    );
-
-    let login_body = LoginRequestHttpBody {
-        email: signup_body.email.clone(),
-        password: signup_body.password.clone(),
-    };
-
-    assert_eq!(
-        instance_state
-            .reqwest_client
-            .post(format!("{}/api/accounts/login", &instance_state.server_url))
-            .json(&login_body)
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::BAD_REQUEST
+        StatusCode::UNAUTHORIZED
     );
 }
