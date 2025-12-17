@@ -11,6 +11,11 @@ pub trait AccountsNotifier: Send + Sync + 'static {
     /// * `account` - A reference to the [Account] that has been signed up
     /// * `verification_ticket` - A reference to the associated [VerificationTicket]
     async fn account_signed_up(&self, account: &Account, verification_ticket: &VerificationTicket);
+
+    /// Triggers a notification when an account has logged in.
+    /// # Arguments
+    /// * `account` - A reference to the [Account] that has logged in
+    async fn account_logged_in(&self, account: &Account);
 }
 
 pub struct DummyAccountsNotifier;
@@ -24,6 +29,15 @@ impl AccountsNotifier for DummyAccountsNotifier {
             "Triggered account_signed_up notification for email \"{}\" with ticket \"{}\"",
             account.email,
             verification_ticket.token.unsafe_inner()
+        );
+    }
+
+    async fn account_logged_in(&self, account: &Account) {
+        // No-op
+        // We log the event for demonstration purposes, this is not safe for production use
+        info!(
+            "Triggered account_logged_in notification for email \"{}\"",
+            account.email
         );
     }
 }

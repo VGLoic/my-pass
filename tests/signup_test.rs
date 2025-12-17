@@ -43,7 +43,7 @@ async fn test_signup() {
 
     let verification_tickets = instance_state
         .accounts_notifier
-        .get_account_tickets(&signup_body.email);
+        .get_signed_up_tickets(&signup_body.email);
     assert_eq!(verification_tickets.len(), 1);
     let last_ticket = verification_tickets.last().unwrap();
 
@@ -107,7 +107,7 @@ async fn test_successive_signup() {
     assert_eq!(
         instance_state
             .accounts_notifier
-            .get_account_tickets(&signup_body.email)
+            .get_signed_up_tickets(&signup_body.email)
             .len(),
         1
     );
@@ -136,7 +136,7 @@ async fn test_successive_verification_ticket_use() {
 
     let verification_tickets = instance_state
         .accounts_notifier
-        .get_account_tickets(&signup_body.email);
+        .get_signed_up_tickets(&signup_body.email);
     assert_eq!(verification_tickets.len(), 1);
     let last_ticket = verification_tickets.last().unwrap();
 

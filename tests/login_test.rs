@@ -42,4 +42,12 @@ async fn test_login() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_body = response.json::<LoginResponse>().await.unwrap();
     assert!(!response_body.access_token.unsafe_inner().is_empty());
+
+    assert!(
+        instance_state
+            .accounts_notifier
+            .get_logins(&signup_body.email)
+            .len()
+            == 1
+    );
 }

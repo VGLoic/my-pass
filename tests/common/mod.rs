@@ -131,36 +131,76 @@ async fn bind_listener_to_free_port() -> Result<tokio::net::TcpListener, anyhow:
     ))
 }
 
+#[derive(Clone, Debug)]
+pub enum Notification {
+    VerificationTicket(VerificationTicket),
+    Login(Account),
+}
+
 /// Fake accounts notifier for tests
 /// It stores the notifications in memory for later inspection
 /// It implements the `AccountsNotifier` trait
 #[derive(Clone)]
 pub struct FakeAccountsNotifier {
-    pub verification_tickets: Arc<Mutex<HashMap<String, Vec<VerificationTicket>>>>,
+    pub notifications: Arc<Mutex<HashMap<String, Vec<Notification>>>>,
 }
 
 impl FakeAccountsNotifier {
     pub fn new() -> Self {
         Self {
-            verification_tickets: Arc::new(Mutex::new(HashMap::new())),
+            notifications: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    #[allow(dead_code)]
-    pub fn get_account_tickets(&self, email: &str) -> Vec<VerificationTicket> {
+    fn get_account_notifications(&self, email: &str) -> Vec<Notification> {
         let lowercase_email = email.to_lowercase();
-        let tickets = self.verification_tickets.lock().unwrap();
-        tickets.get(&lowercase_email).cloned().unwrap_or_default()
+        let notifications = self.notifications.lock().unwrap();
+        notifications
+            .get(&lowercase_email)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code)]
+    pub fn get_signed_up_tickets(&self, email: &str) -> Vec<VerificationTicket> {
+        let notifications = self.get_account_notifications(email);
+        notifications
+            .into_iter()
+            .filter_map(|notification| match notification {
+                Notification::VerificationTicket(ticket) => Some(ticket),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[allow(dead_code)]
+    pub fn get_logins(&self, email: &str) -> Vec<Account> {
+        let notifications = self.get_account_notifications(email);
+        notifications
+            .into_iter()
+            .filter_map(|notification| match notification {
+                Notification::Login(account) => Some(account),
+                _ => None,
+            })
+            .collect()
     }
 }
 
 #[async_trait::async_trait]
 impl AccountsNotifier for FakeAccountsNotifier {
     async fn account_signed_up(&self, account: &Account, ticket: &VerificationTicket) {
-        let mut tickets = self.verification_tickets.lock().unwrap();
-        tickets
+        let mut notifications = self.notifications.lock().unwrap();
+        notifications
             .entry(account.email.to_string().to_lowercase())
             .or_default()
-            .push(ticket.clone());
+            .push(Notification::VerificationTicket(ticket.clone()));
+    }
+
+    async fn account_logged_in(&self, account: &Account) {
+        let mut notifications = self.notifications.lock().unwrap();
+        notifications
+            .entry(account.email.to_string().to_lowercase())
+            .or_default()
+            .push(Notification::Login(account.clone()));
     }
 }

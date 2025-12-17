@@ -503,8 +503,11 @@ async fn login(
         .map_err(|e| match e {
             LoginError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
-    // REMIND ME
-    // - Add notifier
+
+    app_state
+        .accounts_notifier
+        .account_logged_in(&account)
+        .await;
 
     Ok((
         StatusCode::OK,
