@@ -2,16 +2,19 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
+    extract::FromRequestParts,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
 };
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tracing::{error, warn};
 
 use crate::{
     Config,
     domains::accounts::{notifier::AccountsNotifier, repository::AccountsRepository},
+    newtypes::Opaque,
 };
 
 pub mod accounts;
@@ -25,13 +28,11 @@ pub fn app_router(
     let app_state = AppState {
         accounts_repository: Arc::new(accounts_repository),
         accounts_notifier: Arc::new(accounts_notifier),
+        jwt_secret: config.jwt_secret.clone(),
     };
     Router::new()
         .route("/health", get(get_healthcheck))
-        .nest(
-            "/api/accounts",
-            accounts::accounts_router(&config.jwt_secret),
-        )
+        .nest("/api/accounts", accounts::accounts_router())
         .fallback(not_found)
         .with_state(app_state)
 }
@@ -40,6 +41,7 @@ pub fn app_router(
 pub struct AppState {
     accounts_repository: Arc<dyn AccountsRepository>,
     accounts_notifier: Arc<dyn AccountsNotifier>,
+    jwt_secret: Opaque<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -84,6 +86,69 @@ impl IntoResponse for ApiError {
             Self::Unauthorized(msg) => {
                 warn!("Unauthorized access attempt: {}", msg);
                 StatusCode::UNAUTHORIZED.into_response()
+            }
+        }
+    }
+}
+
+// ##########################################
+// ################## AUTH ##################
+// ##########################################
+
+pub struct AuthorizedAccount {
+    pub account_id: uuid::Uuid,
+}
+
+impl FromRequestParts<AppState> for AuthorizedAccount {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let authorization_header = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|header_value| header_value.to_str().ok())
+            .ok_or(AuthError::MissingToken)?;
+
+        let token = authorization_header
+            .strip_prefix("Bearer ")
+            .map(|s| s.to_string())
+            .ok_or(AuthError::MissingToken)?;
+
+        let account_id = jwt::decode_and_validate_jwt(&token.into(), &state.jwt_secret).map_err(
+            |e| match e {
+                jwt::JwtDecodeError::InvalidToken(err) => {
+                    AuthError::InvalidToken(format!("{:?}", err))
+                }
+            },
+        )?;
+        Ok(AuthorizedAccount { account_id })
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum AuthError {
+    #[error("missing token")]
+    MissingToken,
+    #[error("invalid token: {0}")]
+    InvalidToken(String),
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+impl IntoResponse for AuthError {
+    fn into_response(self) -> Response {
+        match self {
+            AuthError::MissingToken => (StatusCode::UNAUTHORIZED, "Unauthorized").into_response(),
+            AuthError::InvalidToken(msg) => {
+                warn!("Invalid token: {}", msg);
+                (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+            }
+            AuthError::Unknown(e) => {
+                error!("Authentication error: {e:?}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
             }
         }
     }

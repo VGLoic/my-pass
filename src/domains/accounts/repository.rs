@@ -40,6 +40,17 @@ pub trait AccountsRepository: Send + Sync + 'static {
     /// - MUST return [FindAccountError::Unknown] for any other errors encountered during retrieval.
     async fn find_account_by_email(&self, email: &Email) -> Result<Account, FindAccountError>;
 
+    /// Retrieves an [Account] by its ID.
+    /// # Arguments
+    /// * `account_id` - The UUID of the account to retrieve.
+    /// # Returns
+    /// * `Account` - The retrieved [Account].
+    /// # Errors
+    /// - MUST return [FindAccountError::NotFound] if no account with the given ID exists.
+    /// - MUST return [FindAccountError::Unknown] for any other errors encountered during retrieval.
+    async fn find_account_by_id(&self, account_id: uuid::Uuid)
+    -> Result<Account, FindAccountError>;
+
     /// Retrieves an [Account] along with its last [VerificationTicket] by email.
     /// # Arguments
     /// * `email` - A string slice representing the email of the account to retrieve.
@@ -207,6 +218,40 @@ impl AccountsRepository for PsqlAccountsRepository {
             Err(sqlx::Error::RowNotFound) => Err(FindAccountError::NotFound),
             Err(e) => Err(FindAccountError::Unknown(
                 anyhow::Error::new(e).context("retrieving account by email"),
+            )),
+        }
+    }
+
+    async fn find_account_by_id(
+        &self,
+        account_id: uuid::Uuid,
+    ) -> Result<Account, FindAccountError> {
+        let query_result = query_as::<_, Account>(
+            r#"
+            SELECT
+                id,
+                email,
+                password_hash,
+                verified,
+                symmetric_key_salt,
+                encrypted_private_key_nonce,
+                encrypted_private_key,
+                public_key,
+                last_login_at,
+                created_at,
+                updated_at
+            FROM account
+            WHERE id = $1
+        "#,
+        )
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await;
+        match query_result {
+            Ok(account) => Ok(account),
+            Err(sqlx::Error::RowNotFound) => Err(FindAccountError::NotFound),
+            Err(e) => Err(FindAccountError::Unknown(
+                anyhow::Error::new(e).context("retrieving account by id"),
             )),
         }
     }

@@ -3,15 +3,15 @@ use crate::{
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
 };
 
-use super::{ApiError, AppState, jwt};
+use super::{ApiError, AppState, AuthorizedAccount, jwt};
 use aes_gcm::{
     Aes256Gcm, Key, KeyInit,
     aead::{Aead, Nonce},
 };
 use anyhow::anyhow;
 use axum::{
-    Extension, Json, Router,
-    extract::{Path, State},
+    Json, Router,
+    extract::State,
     http::StatusCode,
     routing::{get, post},
 };
@@ -30,13 +30,12 @@ use crate::domains::accounts::{
 };
 use tracing::info;
 
-pub fn accounts_router(jwt_secret: &Opaque<String>) -> Router<AppState> {
+pub fn accounts_router() -> Router<AppState> {
     Router::new()
         .route("/signup", post(sign_up))
         .route("/verification-tickets/use", post(use_verification_ticket))
-        .route("/login", post(login).layer(Extension(jwt_secret.clone())))
-        // Added a test route for checking user existence
-        .route("/{email}/test-exists", get(test_user_exists))
+        .route("/login", post(login))
+        .route("/me", get(get_me))
 }
 
 // #######################################
@@ -46,7 +45,7 @@ pub fn accounts_router(jwt_secret: &Opaque<String>) -> Router<AppState> {
 async fn sign_up(
     State(app_state): State<AppState>,
     Json(body): Json<SignUpRequestHttpBody>,
-) -> Result<(StatusCode, Json<AccountResponse>), ApiError> {
+) -> Result<StatusCode, ApiError> {
     let signup_request = body.try_into_domain().map_err(|e| match e {
         SignupRequestError::InvalidEmailFormat(msg) => {
             ApiError::BadRequest(format!("invalid email format: {msg}"))
@@ -90,10 +89,7 @@ async fn sign_up(
 
     info!("Account created with email: {}", created_account.email);
 
-    Ok((
-        StatusCode::CREATED,
-        Json(AccountResponse::from(created_account)),
-    ))
+    Ok(StatusCode::CREATED)
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -315,36 +311,6 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AccountResponse {
-    pub email: String,
-    pub symmetric_key_salt: Opaque<String>,
-    pub encrypted_private_key_nonce: Opaque<String>,
-    pub encrypted_private_key: Opaque<String>,
-    pub public_key: Opaque<String>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-impl From<Account> for AccountResponse {
-    fn from(account: Account) -> Self {
-        AccountResponse {
-            email: account.email.to_string(),
-            symmetric_key_salt: BASE64_STANDARD
-                .encode(account.symmetric_key_salt.unsafe_inner())
-                .into(),
-            encrypted_private_key_nonce: BASE64_STANDARD
-                .encode(account.encrypted_private_key_nonce.unsafe_inner())
-                .into(),
-            encrypted_private_key: account.encrypted_private_key,
-            public_key: BASE64_STANDARD
-                .encode(account.public_key.unsafe_inner())
-                .into(),
-            created_at: account.created_at,
-        }
-    }
-}
-
 // #######################################################
 // ############### USE VERIFICATION TICKET ###############
 // #######################################################
@@ -466,7 +432,6 @@ impl UseVerificationTicketRequestHttpBody {
 
 async fn login(
     State(app_state): State<AppState>,
-    Extension(jwt_secret): Extension<Opaque<String>>,
     Json(body): Json<LoginRequestHttpBody>,
 ) -> Result<(StatusCode, Json<LoginResponse>), ApiError> {
     let email = Email::new(&body.email).map_err(|e| match e {
@@ -485,7 +450,7 @@ async fn login(
         })?;
 
     let login_request = body
-        .try_into_domain(&account, jwt_secret)
+        .try_into_domain(&account, &app_state.jwt_secret)
         .map_err(|e| match e {
             LoginRequestError::InvalidPassword => {
                 ApiError::BadRequest("Invalid email or password".to_string())
@@ -530,7 +495,7 @@ impl LoginRequestHttpBody {
     fn try_into_domain(
         self,
         account: &Account,
-        jwt_secret: Opaque<String>,
+        jwt_secret: &Opaque<String>,
     ) -> Result<LoginRequest, LoginRequestError> {
         let password = Password::new(self.password.unsafe_inner()).map_err(|e| match e {
             PasswordError::Empty => {
@@ -551,7 +516,7 @@ impl LoginRequestHttpBody {
             return Err(LoginRequestError::InvalidPassword);
         }
 
-        let access_token = jwt::encode_jwt(account.id, &jwt_secret).map_err(|e| {
+        let access_token = jwt::encode_jwt(account.id, jwt_secret).map_err(|e| {
             LoginRequestError::Unknown(anyhow::Error::new(e).context("failed to generate token"))
         })?;
 
@@ -564,28 +529,59 @@ pub struct LoginResponse {
     pub access_token: Opaque<String>,
 }
 
-// ##############################################################
-// ############### TEST EXISTENCE - TO BE REMOVED ###############
-// ##############################################################
+// ################################
+// ############## ME ##############
+// ################################
 
-async fn test_user_exists(
+async fn get_me(
     State(app_state): State<AppState>,
-    Path(email): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    let email = Email::new(&email).map_err(|e| match e {
-        EmailError::Empty => ApiError::BadRequest("Email cannot be empty".to_string()),
-        EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
-    })?;
-    match app_state
+    authorized_account: AuthorizedAccount,
+) -> Result<Json<MeResponse>, ApiError> {
+    let account = app_state
         .accounts_repository
-        .find_account_by_email(&email)
+        .find_account_by_id(authorized_account.account_id)
         .await
-    {
-        Ok(_) => Ok(StatusCode::OK),
-        Err(FindAccountError::NotFound) => Ok(StatusCode::NOT_FOUND),
-        Err(e) => Err(ApiError::InternalServerError(e.into())),
+        .map_err(|e| match e {
+            FindAccountError::NotFound => ApiError::NotFound,
+            FindAccountError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    Ok(Json(account.into()))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeResponse {
+    pub email: String,
+    pub symmetric_key_salt: Opaque<String>,
+    pub encrypted_private_key_nonce: Opaque<String>,
+    pub encrypted_private_key: Opaque<String>,
+    pub public_key: Opaque<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<Account> for MeResponse {
+    fn from(account: Account) -> Self {
+        MeResponse {
+            email: account.email.to_string(),
+            symmetric_key_salt: BASE64_STANDARD
+                .encode(account.symmetric_key_salt.unsafe_inner())
+                .into(),
+            encrypted_private_key_nonce: BASE64_STANDARD
+                .encode(account.encrypted_private_key_nonce.unsafe_inner())
+                .into(),
+            encrypted_private_key: account.encrypted_private_key,
+            public_key: BASE64_STANDARD
+                .encode(account.public_key.unsafe_inner())
+                .into(),
+            created_at: account.created_at,
+        }
     }
 }
+
+// #####################################
+// ############### TESTS ###############
+// #####################################
 
 #[cfg(test)]
 mod tests {
@@ -916,11 +912,11 @@ mod tests {
             password: password.unsafe_inner().to_owned().into(),
         };
         let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, jwt_secret.clone());
+        let result = http_request.try_into_domain(&account, &jwt_secret);
         assert!(result.is_ok());
         let login_request = result.unwrap();
         assert_eq!(login_request.account_id, account.id);
-        assert!(jwt::decode_jwt(&login_request.access_token, &jwt_secret).is_ok());
+        assert!(jwt::decode_and_validate_jwt(&login_request.access_token, &jwt_secret).is_ok());
     }
 
     #[test]
@@ -934,7 +930,7 @@ mod tests {
             password: password.unsafe_inner().to_owned().into(),
         };
         let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, jwt_secret.clone());
+        let result = http_request.try_into_domain(&account, &jwt_secret);
         assert!(result.is_err());
         match result.err().unwrap() {
             LoginRequestError::AccountNotVerified => {}
@@ -953,7 +949,7 @@ mod tests {
             password: Opaque::new("".to_string()), // Empty password
         };
         let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, jwt_secret.clone());
+        let result = http_request.try_into_domain(&account, &jwt_secret);
         assert!(result.is_err());
         match result.err().unwrap() {
             LoginRequestError::InvalidPasswordFormat(_) => {}
@@ -971,7 +967,7 @@ mod tests {
             password: password.unsafe_inner().to_owned().into(),
         };
         let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, jwt_secret.clone());
+        let result = http_request.try_into_domain(&account, &jwt_secret);
         assert!(result.is_err());
         match result.err().unwrap() {
             LoginRequestError::InvalidPassword => {}
