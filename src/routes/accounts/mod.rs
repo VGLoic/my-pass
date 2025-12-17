@@ -3,7 +3,7 @@ use crate::{
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
 };
 
-use super::{ApiError, AppState};
+use super::{ApiError, AppState, jwt};
 use aes_gcm::{
     Aes256Gcm, Key, KeyInit,
     aead::{Aead, Nonce},
@@ -529,12 +529,12 @@ impl LoginRequestHttpBody {
             return Err(LoginRequestError::InvalidPassword);
         }
 
-        // REMIND ME
-        // Generate access token (for simplicity, using a random 32-byte value here)
-        let access_token_bytes: [u8; 32] = rand::random();
-        let access_token_b64 = BASE64_URL_SAFE.encode(access_token_bytes);
+        let token_secret = "REMIND_ME_CHANGE_THIS_SECRET_KEY";
+        let access_token = jwt::encode_jwt(account.id, token_secret.into()).map_err(|e| {
+            LoginRequestError::Unknown(anyhow::Error::new(e).context("failed to generate token"))
+        })?;
 
-        Ok(LoginRequest::new(account.id, Opaque::new(access_token_b64)))
+        Ok(LoginRequest::new(account.id, access_token))
     }
 }
 

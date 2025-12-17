@@ -12,6 +12,7 @@ use tracing::{error, warn};
 use crate::domains::accounts::{notifier::AccountsNotifier, repository::AccountsRepository};
 
 pub mod accounts;
+mod jwt;
 
 pub fn app_router(
     accounts_repository: impl AccountsRepository,
