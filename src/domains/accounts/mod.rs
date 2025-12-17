@@ -21,6 +21,7 @@ pub struct Account {
     pub encrypted_private_key_nonce: Opaque<[u8; 12]>,
     pub encrypted_private_key: Opaque<String>,
     pub public_key: Opaque<[u8; 32]>,
+    pub last_login_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -145,6 +146,42 @@ impl UseVerificationTicketRequest {
 
 #[derive(Debug, Error)]
 pub enum UseVerificationTicketError {
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+// #############################################
+// ############### ACCOUNT LOGIN ###############
+// #############################################
+
+pub struct LoginRequest {
+    pub account_id: uuid::Uuid,
+    pub access_token: Opaque<String>,
+}
+
+impl LoginRequest {
+    pub fn new(account_id: uuid::Uuid, access_token: Opaque<String>) -> Self {
+        LoginRequest {
+            account_id,
+            access_token,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum LoginRequestError {
+    #[error("Invalid password format: {0}")]
+    InvalidPasswordFormat(String),
+    #[error("Password hash does not match")]
+    InvalidPassword,
+    #[error("Account is not verified")]
+    AccountNotVerified,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum LoginError {
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
 }

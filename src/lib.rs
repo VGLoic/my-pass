@@ -21,6 +21,9 @@ pub struct Config {
     /// Database connection URL
     /// Format: `postgresql://<Postgres user>:<Postgres password>@<Postgres host>:<Postgres port>/<Postgres DB>`
     pub database_url: newtypes::Opaque<String>,
+    /// JWT secret key
+    /// Used to sign and verify JWT tokens
+    pub jwt_secret: newtypes::Opaque<String>,
 }
 
 impl Config {
@@ -51,6 +54,14 @@ impl Config {
             }
         };
 
+        let jwt_secret = match parse_required_env_variable::<String>("JWT_SECRET") {
+            Ok(v) => newtypes::Opaque::new(v),
+            Err(e) => {
+                errors.push(e);
+                newtypes::Opaque::new(String::new())
+            }
+        };
+
         if !errors.is_empty() {
             return Err(errors);
         }
@@ -59,6 +70,7 @@ impl Config {
             port,
             log_level,
             database_url,
+            jwt_secret,
         })
     }
 }

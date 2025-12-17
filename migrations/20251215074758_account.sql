@@ -12,6 +12,7 @@ CREATE TABLE "account" (
     encrypted_private_key_nonce BYTEA       NOT NULL,
     encrypted_private_key       TEXT        NOT NULL,
     public_key                  BYTEA       NOT NULL,
+    last_login_at               TIMESTAMPTZ NULL,
     created_at                  TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP,
     updated_at                  TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP
 );
