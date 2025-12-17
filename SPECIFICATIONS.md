@@ -113,14 +113,7 @@ Response:
 **Client Side:**
 - The user fills out a login form with their email and password,
 - The client sends the email and password to the server using the endpoint described below,
-- Upon receiving the response, the client receives:
-    - the JWT access token,
-    - the encrypted private key,
-    - the salt for symmetric key derivation,
-    - the nonce for encrypted private key,
-- The client uses the password and the salt to derive the symmetric key using Argon2id,
-- The client decrypts the private key using the derived symmetric key and the nonce,
-- The private key and access token are stored in memory for the session.
+- Upon receiving the response, the client receives the JWT access token.
 
 **Server Side:**
 
@@ -136,15 +129,14 @@ Handler logic:
 1. Validate the email and password format,
 2. Retrieve the account associated with the email from the database,
 3. Verify the password against the stored hashed password using Argon2id,
-4. If the password is correct, generates a JWT access token with the following claims:
+4. Verify that the account email is verified,
+5. If the password is correct and account verified, generates a JWT access token with the following claims:
+    - aud: audience, constant string identifying the application,
     - sub: account ID,
-    - iat: issued at timestamp,
+    - nbf: not before timestamp: current time,
     - exp: expiration timestamp: 1 hour from issuance,
-4. Signs the JWT access token using HMAC-SHA3-256 with a server-side secret key,
-5. Returns to the client:
-    - the JWT access token,
-    - the encrypted private key,
-    - the salt for symmetric key derivation.
+6. Signs the JWT access token using HMAC-SHA-256 with a server-side secret key,
+7. Returns to the client the JWT access token.
 
 Remarks:
 - The server never stores or logs the plaintext password or encrypted private key.
@@ -154,9 +146,6 @@ Response:
 ```json
 {
   "accessToken": "<jwt_access_token>",
-  "encryptedPrivateKey": "<user_encrypted_private_key>",
-  "symmetricKeySalt": "<salt_for_symmetric_key_derivation>",
-  "encryptedPrivateKeyNonce": "<user_encrypted_private_key_nonce>"
 }
 ```
 - On failure: appropriate HTTP error code with message.
@@ -165,18 +154,17 @@ Response:
 ### 4. Resend Verification Email
 
 **Client Side:**
-- The user must be logged in but not verified,
-- Using the access token, the client sends an authorized request to the server using the endpoint described below.
+- The user fills out a login form with their email and password,
+- The client sends a request to the server using the endpoint described below with their email and password.
 
 **Server Side:**
-Endpoint: `POST /api/accounts/verification-tickets/resend` with Authorization header:
-```Authorization: Bearer <jwt_access_token>```
+Endpoint: `POST /api/accounts/verification-tickets/resend`
 
 Handler logic:
-1. Validate the JWT access token,
-2. Retrieve the account associated with the token from the database,
-3. Retrieve the last verification ticket associated with the account,
-4. Check if the account is not verified,
+1. Validate the email and password format,
+2. Retrieve the account associated with the email from the database,
+3. Verify the password against the stored hashed password using Argon2id,
+4. Verify that the account email is not verified,
 5. Check if the last ticket has not been sent less than 5 minutes ago,
 6. Generate a new verification token, it is valid for 15 minutes,
 7. In database:
