@@ -150,6 +150,57 @@ pub enum UseVerificationTicketError {
     Unknown(#[from] anyhow::Error),
 }
 
+// #######################################################
+// ############### NEW VERIFICATION TICKET ###############
+// #######################################################
+
+pub struct NewVerificationTicketRequest {
+    pub account_id: uuid::Uuid,
+    pub ticket_id_to_cancel: Option<uuid::Uuid>,
+    pub verification_ticket_token: Opaque<String>,
+    pub verification_ticket_expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Error)]
+pub enum NewVerificationTicketRequestError {
+    #[error("Invalid password format: {0}")]
+    InvalidPasswordFormat(String),
+    #[error("Password hash does not match")]
+    InvalidPassword,
+    #[error("Account is already verified")]
+    AlreadyVerified,
+    #[error("Not enough time has passed since the last ticket was created")]
+    NotEnoughTimePassed,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+impl NewVerificationTicketRequest {
+    pub fn new(
+        account_id: uuid::Uuid,
+        ticket_id_to_cancel: Option<uuid::Uuid>,
+        verification_ticket_token: Opaque<[u8; 32]>,
+        verification_ticket_lifetime: chrono::Duration,
+    ) -> Self {
+        let verification_ticket_token =
+            BASE64_URL_SAFE.encode(verification_ticket_token.unsafe_inner());
+        let verification_ticket_expires_at = chrono::Utc::now() + verification_ticket_lifetime;
+
+        NewVerificationTicketRequest {
+            account_id,
+            ticket_id_to_cancel,
+            verification_ticket_token: verification_ticket_token.into(),
+            verification_ticket_expires_at,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum NewVerificationTicketError {
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
 // #############################################
 // ############### ACCOUNT LOGIN ###############
 // #############################################
@@ -207,7 +258,7 @@ pub enum FindLastVerificationTicketError {
     #[error("Account not found")]
     AccountNotFound,
     #[error("No verification ticket found")]
-    NoVerificationTicket,
+    NoVerificationTicket(Account),
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
 }

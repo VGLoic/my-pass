@@ -85,7 +85,7 @@ Response:
 
 ## Server Side:
 
-Endpoint `POST /api/accounts/verification-tickets/verify` with request body:
+Endpoint `POST /api/accounts/verification-tickets/use` with request body:
 ```json
 {
   "email": "<user_email>",
@@ -116,7 +116,7 @@ Response:
 - The client sends a request to the server using the endpoint described below with their email and password.
 
 **Server Side:**
-Endpoint: `POST /api/accounts/verification-tickets/resend`
+Endpoint: `POST /api/accounts/verification-tickets`
 
 Handler logic:
 1. Validate the email and password format,
