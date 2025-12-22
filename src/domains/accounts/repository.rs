@@ -3,7 +3,8 @@ use sqlx::{Pool, Postgres, Row, query, query_as};
 
 use super::{
     Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginError,
-    SignupRequest, UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
+    NewVerificationTicketError, NewVerificationTicketRequest, SignupRequest,
+    UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
 };
 use crate::newtypes::Email;
 
@@ -26,6 +27,19 @@ pub trait AccountsRepository: Send + Sync + 'static {
         &self,
         signup_request: &SignupRequest,
     ) -> Result<(Account, VerificationTicket), CreateAccountError>;
+
+    /// Creates a new [VerificationTicket] for an existing account.
+    /// If there is an existing active ticket, it is cancelled.
+    /// # Arguments
+    /// * `new_verification_ticket_request` - A reference to the [NewVerificationTicketRequest] containing details for the new ticket.
+    /// # Returns
+    /// * `VerificationTicket` - The created [VerificationTicket].
+    /// # Errors
+    /// - MUST return [CreateAccountError::Unknown] for any errors encountered during ticket creation
+    async fn create_new_verification_ticket(
+        &self,
+        new_verification_ticket_request: &NewVerificationTicketRequest,
+    ) -> Result<VerificationTicket, NewVerificationTicketError>;
 
     /// Retrieves an [Account] by its email.
     ///
@@ -189,6 +203,73 @@ impl AccountsRepository for PsqlAccountsRepository {
         Ok((account, verification_ticket))
     }
 
+    async fn create_new_verification_ticket(
+        &self,
+        new_verification_ticket_request: &NewVerificationTicketRequest,
+    ) -> Result<VerificationTicket, NewVerificationTicketError> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| anyhow!(e).context("failed to start transaction"))?;
+
+        if let Some(ticket_id_to_cancel) = new_verification_ticket_request.ticket_id_to_cancel {
+            // Cancel existing active ticket
+            let update_result = query(
+                r#"
+                UPDATE verification_ticket
+                SET cancelled_at = NOW()
+                WHERE id = $1 AND account_id = $2 AND used_at IS NULL AND cancelled_at IS NULL
+            "#,
+            )
+            .bind(ticket_id_to_cancel)
+            .bind(new_verification_ticket_request.account_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|e| anyhow!(e).context("failed to cancel existing verification tickets"))?;
+
+            if update_result.rows_affected() != 1 {
+                return Err(anyhow!("no rows updated")
+                    .context("failed to cancel existing verification ticket")
+                    .into());
+            }
+        }
+
+        // Create new ticket
+        let verification_ticket = query_as::<_, VerificationTicket>(
+            r#"
+            INSERT INTO verification_ticket (
+                account_id,
+                token,
+                expires_at
+            ) VALUES ($1, $2, $3)
+             RETURNING
+                id,
+                account_id,
+                token,
+                expires_at,
+                created_at,
+                expires_at,
+                cancelled_at,
+                used_at,
+                updated_at
+        "#,
+        )
+        .bind(new_verification_ticket_request.account_id)
+        .bind(&new_verification_ticket_request.verification_ticket_token)
+        .bind(new_verification_ticket_request.verification_ticket_expires_at)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|e| anyhow!(e).context("failed to create new verification ticket"))?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|e| anyhow!(e).context("failed to commit transaction"))?;
+
+        Ok(verification_ticket)
+    }
+
     async fn find_account_by_email(&self, email: &Email) -> Result<Account, FindAccountError> {
         // The `r` is for raw string literals in Rust, allowing us to write SQL queries without caring about escaping characters.
         // The `#` is a delimiter that allows us to include double quotes in the SQL query without needing to escape them.
@@ -336,7 +417,9 @@ impl AccountsRepository for PsqlAccountsRepository {
                         anyhow::Error::new(e).context("checking verification ticket existence")
                     })?;
                 if verification_ticket_exists.is_none() {
-                    return Err(FindLastVerificationTicketError::NoVerificationTicket);
+                    return Err(FindLastVerificationTicketError::NoVerificationTicket(
+                        account,
+                    ));
                 }
 
                 let ticket = VerificationTicket {

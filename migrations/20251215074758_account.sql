@@ -35,3 +35,8 @@ CREATE TRIGGER update_verification_ticket_moddatetime
 BEFORE UPDATE ON "verification_ticket"
 FOR EACH ROW
 EXECUTE FUNCTION moddatetime('updated_at');
+
+-- Constrain one active (not used, not cancelled, not expired) ticket per account.
+CREATE UNIQUE INDEX IF NOT EXISTS unique_active_verification_ticket_per_account
+ON "verification_ticket" (account_id)
+WHERE used_at IS NULL AND cancelled_at IS NULL;

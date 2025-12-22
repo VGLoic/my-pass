@@ -25,8 +25,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::domains::accounts::{
     Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginError,
-    LoginRequest, LoginRequestError, SignupRequest, SignupRequestError, UseVerificationTicketError,
-    UseVerificationTicketRequest, UseVerificationTicketRequestError, VerificationTicket,
+    LoginRequest, LoginRequestError, NewVerificationTicketError, NewVerificationTicketRequest,
+    NewVerificationTicketRequestError, SignupRequest, SignupRequestError,
+    UseVerificationTicketError, UseVerificationTicketRequest, UseVerificationTicketRequestError,
+    VerificationTicket,
 };
 use tracing::info;
 
@@ -34,6 +36,7 @@ pub fn accounts_router() -> Router<AppState> {
     Router::new()
         .route("/signup", post(sign_up))
         .route("/verification-tickets/use", post(use_verification_ticket))
+        .route("/verification-tickets", post(new_verification_ticket))
         .route("/login", post(login))
         .route("/me", get(get_me))
 }
@@ -329,7 +332,7 @@ async fn use_verification_ticket(
         .await
         .map_err(|e| match e {
             FindLastVerificationTicketError::AccountNotFound => ApiError::NotFound,
-            FindLastVerificationTicketError::NoVerificationTicket => {
+            FindLastVerificationTicketError::NoVerificationTicket(_) => {
                 ApiError::BadRequest("No verification ticket has been found".to_string())
             }
             FindLastVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
@@ -422,6 +425,125 @@ impl UseVerificationTicketRequestHttpBody {
         Ok(UseVerificationTicketRequest::new(
             account.id,
             verification_ticket.id,
+        ))
+    }
+}
+
+// #######################################################
+// ############### NEW VERIFICATION TICKET ###############
+// #######################################################
+
+async fn new_verification_ticket(
+    State(app_state): State<AppState>,
+    Json(body): Json<NewVerificationTicketRequestHttpBody>,
+) -> Result<StatusCode, ApiError> {
+    let email = Email::new(&body.email).map_err(|e| match e {
+        EmailError::Empty => ApiError::BadRequest("Email cannot be empty".to_string()),
+        EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
+    })?;
+    let (account, last_verification_ticket) = match app_state
+        .accounts_repository
+        .find_account_and_last_verification_ticket_by_email(&email)
+        .await
+    {
+        Ok((account, last_verification_ticket)) => (account, Some(last_verification_ticket)),
+        Err(e) => match e {
+            FindLastVerificationTicketError::AccountNotFound => {
+                return Err(ApiError::NotFound);
+            }
+            FindLastVerificationTicketError::NoVerificationTicket(account) => (account, None),
+            FindLastVerificationTicketError::Unknown(err) => {
+                return Err(ApiError::InternalServerError(err));
+            }
+        },
+    };
+
+    // Map to domain
+    let domain_request = body
+        .try_into_domain(&account, &last_verification_ticket)
+        .map_err(|e| match e {
+            NewVerificationTicketRequestError::InvalidPasswordFormat(msg) => {
+                ApiError::BadRequest(format!("invalid password format: {msg}"))
+            }
+            NewVerificationTicketRequestError::InvalidPassword => {
+                ApiError::BadRequest("Invalid password".to_string())
+            }
+            NewVerificationTicketRequestError::AlreadyVerified => {
+                ApiError::BadRequest("Account is already verified".to_string())
+            }
+            NewVerificationTicketRequestError::NotEnoughTimePassed => ApiError::BadRequest(
+                "Not enough time has passed since the last ticket was created".to_string(),
+            ),
+            NewVerificationTicketRequestError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    // Cancel existing ticket if any and create a new one
+    let verification_ticket = app_state
+        .accounts_repository
+        .create_new_verification_ticket(&domain_request)
+        .await
+        .map_err(|e| match e {
+            NewVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
+        })?;
+
+    app_state
+        .accounts_notifier
+        .new_verification_ticket_created(&account, &verification_ticket)
+        .await;
+
+    Ok(StatusCode::CREATED)
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct NewVerificationTicketRequestHttpBody {
+    pub email: String,
+    pub password: Opaque<String>,
+}
+
+impl NewVerificationTicketRequestHttpBody {
+    fn try_into_domain(
+        self,
+        account: &Account,
+        ticket: &Option<VerificationTicket>,
+    ) -> Result<NewVerificationTicketRequest, NewVerificationTicketRequestError> {
+        let password = Password::new(self.password.unsafe_inner()).map_err(|e| match e {
+            PasswordError::Empty => NewVerificationTicketRequestError::InvalidPasswordFormat(
+                "Password cannot be empty".to_string(),
+            ),
+            PasswordError::InvalidPassword(reason) => {
+                NewVerificationTicketRequestError::InvalidPasswordFormat(reason)
+            }
+        })?;
+
+        if password
+            .verify(account.password_hash.unsafe_inner())
+            .is_err()
+        {
+            return Err(NewVerificationTicketRequestError::InvalidPassword);
+        }
+
+        if account.verified {
+            return Err(NewVerificationTicketRequestError::AlreadyVerified);
+        }
+
+        if let Some(existing_ticket) = ticket {
+            let min_interval = chrono::Duration::minutes(5);
+            let now = chrono::Utc::now();
+            if existing_ticket.created_at + min_interval > now {
+                return Err(NewVerificationTicketRequestError::NotEnoughTimePassed);
+            }
+        }
+
+        // Verification token is a base64url-encoded random 32-byte value
+        let verification_ticket_token: [u8; 32] = rand::random();
+
+        let verification_ticket_lifetime = chrono::Duration::minutes(15);
+
+        Ok(NewVerificationTicketRequest::new(
+            account.id,
+            ticket.as_ref().map(|t| t.id),
+            verification_ticket_token.into(),
+            verification_ticket_lifetime,
         ))
     }
 }
@@ -589,6 +711,8 @@ mod tests {
     use fake::{Fake, Faker};
 
     use super::*;
+
+    // ################ SIGNUP TESTS ################
 
     #[test]
     fn test_valid_signup_request() {
@@ -790,6 +914,8 @@ mod tests {
         };
     }
 
+    // ################ USE VERIFICATION TICKET TESTS ################
+
     #[test]
     fn test_valid_use_verification_ticket_request() {
         let account = fake_account();
@@ -901,6 +1027,8 @@ mod tests {
         };
     }
 
+    // ################ LOGIN TESTS ################
+
     #[test]
     fn test_valid_login_request() {
         let password = Faker.fake::<Password>();
@@ -1009,5 +1137,132 @@ mod tests {
             used_at: None,
             updated_at: chrono::Utc::now(),
         }
+    }
+
+    // ################ NEW VERIFICATION TICKET TESTS ################
+
+    #[test]
+    fn test_valid_new_verification_ticket_request_without_last_ticket() {
+        let mut account = fake_account();
+        let password = Faker.fake::<Password>();
+        account.password_hash = password.hash().unwrap().into();
+        let http_request = NewVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            password: password.unsafe_inner().to_owned().into(),
+        };
+        let last_ticket = None;
+        let result = http_request.try_into_domain(&account, &last_ticket);
+        assert!(result.is_ok());
+        let new_ticket_request = result.unwrap();
+        assert_eq!(new_ticket_request.account_id, account.id);
+        assert_eq!(new_ticket_request.ticket_id_to_cancel, None);
+        assert!(
+            !new_ticket_request
+                .verification_ticket_token
+                .unsafe_inner()
+                .is_empty()
+        );
+        assert!(new_ticket_request.verification_ticket_expires_at > chrono::Utc::now());
+    }
+
+    #[test]
+    fn test_valid_new_verification_ticket_request_with_last_ticket() {
+        let mut account = fake_account();
+        let password = Faker.fake::<Password>();
+        account.password_hash = password.hash().unwrap().into();
+        let mut last_ticket = fake_verification_ticket(account.id);
+        last_ticket.created_at = chrono::Utc::now() - chrono::Duration::minutes(6);
+        last_ticket.expires_at = chrono::Utc::now() + chrono::Duration::minutes(9);
+        let http_request = NewVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            password: password.unsafe_inner().to_owned().into(),
+        };
+
+        let result = http_request.try_into_domain(&account, &Some(last_ticket.clone()));
+        assert!(result.is_ok());
+        let new_ticket_request = result.unwrap();
+        assert_eq!(new_ticket_request.account_id, account.id);
+        assert_eq!(new_ticket_request.ticket_id_to_cancel, Some(last_ticket.id));
+        assert!(
+            !new_ticket_request
+                .verification_ticket_token
+                .unsafe_inner()
+                .is_empty()
+        );
+        assert!(new_ticket_request.verification_ticket_expires_at > chrono::Utc::now());
+    }
+
+    #[test]
+    fn test_invalid_new_verification_ticket_request_invalid_password_format() {
+        let mut account = fake_account();
+        let password = Faker.fake::<Password>();
+        account.password_hash = password.hash().unwrap().into();
+        let http_request = NewVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            password: Opaque::new("".to_string()), // Empty password
+        };
+        let last_ticket = None;
+        let result = http_request.try_into_domain(&account, &last_ticket);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            NewVerificationTicketRequestError::InvalidPasswordFormat(_) => {}
+            _ => panic!("Expected InvalidPasswordFormat error"),
+        };
+    }
+
+    #[test]
+    fn test_invalid_new_verification_ticket_request_invalid_password() {
+        let account = fake_account();
+        let password = Faker.fake::<Password>();
+        let http_request = NewVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            password: password.unsafe_inner().to_owned().into(), // Different password
+        };
+        let last_ticket = None;
+        let result = http_request.try_into_domain(&account, &last_ticket);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            NewVerificationTicketRequestError::InvalidPassword => {}
+            _ => panic!("Expected InvalidPassword error"),
+        };
+    }
+
+    #[test]
+    fn test_invalid_new_verification_ticket_request_account_already_verified() {
+        let mut account = fake_account();
+        let password = Faker.fake::<Password>();
+        account.password_hash = password.hash().unwrap().into();
+        account.verified = true;
+        let http_request = NewVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            password: password.unsafe_inner().to_owned().into(),
+        };
+        let last_ticket = None;
+        let result = http_request.try_into_domain(&account, &last_ticket);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            NewVerificationTicketRequestError::AlreadyVerified => {}
+            _ => panic!("Expected AlreadyVerified error"),
+        };
+    }
+
+    #[test]
+    fn test_invalid_new_verification_ticket_request_not_enough_time_passed() {
+        let mut account = fake_account();
+        let password = Faker.fake::<Password>();
+        account.password_hash = password.hash().unwrap().into();
+        let mut last_ticket = fake_verification_ticket(account.id);
+        last_ticket.created_at = chrono::Utc::now() - chrono::Duration::minutes(4);
+        last_ticket.expires_at = chrono::Utc::now() + chrono::Duration::minutes(11);
+        let http_request = NewVerificationTicketRequestHttpBody {
+            email: account.email.to_string(),
+            password: password.unsafe_inner().to_owned().into(),
+        };
+        let result = http_request.try_into_domain(&account, &Some(last_ticket.clone()));
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            NewVerificationTicketRequestError::NotEnoughTimePassed => {}
+            _ => panic!("Expected NotEnoughTimePassed error"),
+        };
     }
 }

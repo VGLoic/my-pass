@@ -203,4 +203,16 @@ impl AccountsNotifier for FakeAccountsNotifier {
             .or_default()
             .push(Notification::Login(account.clone()));
     }
+
+    async fn new_verification_ticket_created(
+        &self,
+        account: &Account,
+        ticket: &VerificationTicket,
+    ) {
+        let mut notifications = self.notifications.lock().unwrap();
+        notifications
+            .entry(account.email.to_string().to_lowercase())
+            .or_default()
+            .push(Notification::VerificationTicket(ticket.clone()));
+    }
 }
