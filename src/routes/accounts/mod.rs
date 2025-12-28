@@ -1,5 +1,5 @@
 use crate::{
-    argon2instance::argon2_instance,
+    crypto::argon2_instance,
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
     secrets,
 };

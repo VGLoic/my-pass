@@ -1,13 +1,10 @@
-use anyhow::anyhow;
-use argon2::{PasswordHash, PasswordHasher, PasswordVerifier, password_hash::Salt};
-use base64::{Engine, prelude::BASE64_STANDARD_NO_PAD};
 use fake::{Dummy, Fake, faker, rand};
 use serde::{Deserialize, Serialize};
 use sqlx::{Database, Decode, Encode, Type};
 use std::fmt::Debug;
 use validator::ValidateEmail;
 
-use crate::argon2instance::argon2_instance;
+use super::crypto;
 
 // #######################################################
 // #################### OPAQUE STRING ####################
@@ -341,15 +338,7 @@ impl Password {
 
     /// Hash a password using the Argon2id algorithm. The returned string is a argon2-formatted hash.
     pub fn hash(&self) -> Result<String, anyhow::Error> {
-        let salt: [u8; 16] = rand::random();
-        let base64_salt = BASE64_STANDARD_NO_PAD.encode(salt);
-        let argon_salt = Salt::from_b64(&base64_salt).map_err(|e| {
-            anyhow!(e).context("failed to build Salt struct from base64 salt string")
-        })?;
-        argon2_instance()
-            .hash_password(self.0.as_bytes(), argon_salt)
-            .map_err(|e| anyhow!(e).context("failed to hash password"))
-            .map(|v| v.to_string())
+        crypto::hash_password(&self.0)
     }
 
     /// Verify a password validity against an Argon2id formatted key
@@ -357,12 +346,7 @@ impl Password {
     /// # Arguments
     /// * `password_hash` - Argon2id formatted hash to verify against
     pub fn verify(&self, password_hash: &str) -> Result<(), anyhow::Error> {
-        let password_hash = PasswordHash::new(password_hash).map_err(|e| {
-            anyhow!(e).context("failed to build PasswordHash struct from raw string")
-        })?;
-        argon2_instance()
-            .verify_password(self.0.as_bytes(), &password_hash)
-            .map_err(|e| anyhow!(e).context("failed to verify password"))
+        crypto::verify_password(password_hash, &self.0)
     }
 
     /// Reference the inner value
