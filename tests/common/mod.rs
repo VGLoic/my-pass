@@ -70,7 +70,10 @@ pub async fn setup_instance(
         .connect(
             secrets_manager
                 .get(SecretKey::DatabaseUrl)
-                .unwrap()
+                .map_err(|e| {
+                    anyhow::anyhow!("{e}")
+                        .context("Failed to get database URL from secrets manager")
+                })?
                 .unsafe_inner(),
         )
         .await
