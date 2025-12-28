@@ -65,7 +65,7 @@ impl InMemorySecretsManager {
             Err(e) => {
                 errors.push(e);
             }
-        }
+        };
 
         if !errors.is_empty() {
             return Err(errors);
@@ -79,7 +79,7 @@ fn parse_required_env_variable(key: &str) -> Result<String, anyhow::Error> {
     match env::var(key) {
         Ok(v) => {
             if v.is_empty() {
-                Err(anyhow!("[{key}]: empty value non allowed"))
+                Err(anyhow!("[{key}]: empty value not allowed"))
             } else {
                 Ok(v)
             }
