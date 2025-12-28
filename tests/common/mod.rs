@@ -11,7 +11,7 @@ use axum::{
     http::{Request, Response},
 };
 use my_pass::{
-    Config,
+    config::Config,
     domains::accounts::{Account, VerificationTicket, notifier::AccountsNotifier},
     newtypes::Opaque,
     routes::app_router,

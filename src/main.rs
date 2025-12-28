@@ -8,7 +8,7 @@ use axum::{
 };
 use dotenvy::dotenv;
 use my_pass::{
-    Config,
+    config::Config,
     routes::app_router,
     secrets::{InMemorySecretsManager, SecretKey, SecretsManager},
 };
