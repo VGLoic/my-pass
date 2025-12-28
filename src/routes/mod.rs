@@ -28,7 +28,6 @@ pub fn app_router(
         secrets_manager: Arc::new(secrets_manager),
         accounts_repository: Arc::new(accounts_repository),
         accounts_notifier: Arc::new(accounts_notifier),
-        // jwt_secret: config.jwt_secret.clone(),
     };
     Router::new()
         .route("/health", get(get_healthcheck))
@@ -42,7 +41,6 @@ pub struct AppState {
     secrets_manager: Arc<dyn SecretsManager>,
     accounts_repository: Arc<dyn AccountsRepository>,
     accounts_notifier: Arc<dyn AccountsNotifier>,
-    // jwt_secret: Opaque<String>,
 }
 
 #[derive(Serialize, Deserialize)]
