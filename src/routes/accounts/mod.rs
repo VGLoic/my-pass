@@ -1,6 +1,7 @@
 use crate::{
     argon2instance::argon2_instance,
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
+    secrets,
 };
 
 use super::{ApiError, AppState, AuthorizedAccount, jwt};
@@ -571,8 +572,15 @@ async fn login(
             FindAccountError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
 
+    let jwt_secret = app_state
+        .secrets_manager
+        .get(secrets::SecretKey::JwtSecret)
+        .map_err(|e| {
+            anyhow::anyhow!("{e}").context("Failed to get JWT secret from secrets manager")
+        })?;
+
     let login_request = body
-        .try_into_domain(&account, &app_state.jwt_secret)
+        .try_into_domain(&account, &jwt_secret)
         .map_err(|e| match e {
             LoginRequestError::InvalidPassword => {
                 ApiError::BadRequest("Invalid email or password".to_string())

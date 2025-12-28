@@ -23,7 +23,11 @@ pub enum SecretsManagerError {
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum SecretKey {
+    /// Database connection URL
+    /// Format: `postgresql://<Postgres user>:<Postgres password>@<Postgres host>:<Postgres port>/<Postgres DB>`
     DatabaseUrl,
+    /// JWT secret key
+    /// Used to sign and verify JWT tokens
     JwtSecret,
 }
 

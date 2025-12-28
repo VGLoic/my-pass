@@ -34,9 +34,6 @@ pub fn default_test_config() -> Config {
     Config {
         port: 0,
         log_level: Level::WARN,
-        database_url: "postgresql://admin:admin@localhost:5433/mypass"
-            .to_string()
-            .into(),
         jwt_secret: "my_jwt_secret_for_tests_only".to_string().into(),
     }
 }
@@ -98,7 +95,6 @@ pub async fn setup_instance(
     let accounts_notifier = FakeAccountsNotifier::new();
 
     let app = app_router(
-        &config,
         secrets_manager,
         accounts_repository,
         accounts_notifier.clone(),

@@ -12,17 +12,14 @@ use thiserror::Error;
 use tracing::{error, warn};
 
 use crate::{
-    Config,
     domains::accounts::{notifier::AccountsNotifier, repository::AccountsRepository},
-    newtypes::Opaque,
-    secrets::SecretsManager,
+    secrets::{self, SecretsManager},
 };
 
 pub mod accounts;
 mod jwt;
 
 pub fn app_router(
-    config: &Config,
     secrets_manager: impl SecretsManager,
     accounts_repository: impl AccountsRepository,
     accounts_notifier: impl AccountsNotifier,
@@ -31,7 +28,7 @@ pub fn app_router(
         secrets_manager: Arc::new(secrets_manager),
         accounts_repository: Arc::new(accounts_repository),
         accounts_notifier: Arc::new(accounts_notifier),
-        jwt_secret: config.jwt_secret.clone(),
+        // jwt_secret: config.jwt_secret.clone(),
     };
     Router::new()
         .route("/health", get(get_healthcheck))
@@ -45,7 +42,7 @@ pub struct AppState {
     secrets_manager: Arc<dyn SecretsManager>,
     accounts_repository: Arc<dyn AccountsRepository>,
     accounts_notifier: Arc<dyn AccountsNotifier>,
-    jwt_secret: Opaque<String>,
+    // jwt_secret: Opaque<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -121,13 +118,19 @@ impl FromRequestParts<AppState> for AuthorizedAccount {
             .map(|s| s.to_string())
             .ok_or(AuthError::MissingToken)?;
 
-        let account_id = jwt::decode_and_validate_jwt(&token.into(), &state.jwt_secret).map_err(
-            |e| match e {
+        let jwt_secret = state
+            .secrets_manager
+            .get(secrets::SecretKey::JwtSecret)
+            .map_err(|e| {
+                anyhow::anyhow!("{e}").context("Failed to get JWT secret from secrets manager")
+            })?;
+
+        let account_id =
+            jwt::decode_and_validate_jwt(&token.into(), &jwt_secret).map_err(|e| match e {
                 jwt::JwtDecodeError::InvalidToken(err) => {
                     AuthError::InvalidToken(format!("{:?}", err))
                 }
-            },
-        )?;
+            })?;
         Ok(AuthorizedAccount { account_id })
     }
 }
