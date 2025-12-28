@@ -21,7 +21,7 @@ pub enum SecretsManagerError {
     NotFound,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum SecretKey {
     /// Database connection URL
     /// Format: `postgresql://<Postgres user>:<Postgres password>@<Postgres host>:<Postgres port>/<Postgres DB>`
