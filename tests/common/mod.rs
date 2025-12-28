@@ -34,7 +34,6 @@ pub fn default_test_config() -> Config {
     Config {
         port: 0,
         log_level: Level::WARN,
-        jwt_secret: "my_jwt_secret_for_tests_only".to_string().into(),
     }
 }
 
