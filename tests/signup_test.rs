@@ -6,9 +6,13 @@ mod common;
 use common::{default_test_config, setup_instance};
 use my_pass::routes::accounts::{SignUpRequestHttpBody, UseVerificationTicketRequestHttpBody};
 
+use crate::common::default_test_secrets_manager;
+
 #[tokio::test]
 async fn test_signup() {
-    let instance_state = setup_instance(default_test_config()).await.unwrap();
+    let instance_state = setup_instance(default_test_config(), default_test_secrets_manager())
+        .await
+        .unwrap();
 
     let signup_body = Faker.fake::<SignUpRequestHttpBody>();
 
@@ -56,7 +60,9 @@ async fn test_signup() {
 
 #[tokio::test]
 async fn test_successive_signup() {
-    let instance_state = setup_instance(default_test_config()).await.unwrap();
+    let instance_state = setup_instance(default_test_config(), default_test_secrets_manager())
+        .await
+        .unwrap();
 
     let signup_body = Faker.fake::<SignUpRequestHttpBody>();
 
@@ -101,7 +107,9 @@ async fn test_successive_signup() {
 
 #[tokio::test]
 async fn test_successive_verification_ticket_use() {
-    let instance_state = setup_instance(default_test_config()).await.unwrap();
+    let instance_state = setup_instance(default_test_config(), default_test_secrets_manager())
+        .await
+        .unwrap();
 
     let signup_body = Faker.fake::<SignUpRequestHttpBody>();
 
@@ -164,7 +172,9 @@ async fn test_successive_verification_ticket_use() {
 
 #[tokio::test]
 async fn test_invalid_verification_ticket_use() {
-    let instance_state = setup_instance(default_test_config()).await.unwrap();
+    let instance_state = setup_instance(default_test_config(), default_test_secrets_manager())
+        .await
+        .unwrap();
 
     let signup_body = Faker.fake::<SignUpRequestHttpBody>();
 

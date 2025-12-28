@@ -11,9 +11,11 @@ use axum::{
     http::{Request, Response},
 };
 use my_pass::{
-    Config,
+    config::Config,
     domains::accounts::{Account, VerificationTicket, notifier::AccountsNotifier},
+    newtypes::Opaque,
     routes::app_router,
+    secrets::{SecretKey, SecretsManager, SecretsManagerError},
 };
 use sqlx::postgres::PgPoolOptions;
 use tower_http::trace::TraceLayer;
@@ -32,14 +34,30 @@ pub fn default_test_config() -> Config {
     Config {
         port: 0,
         log_level: Level::WARN,
-        database_url: "postgresql://admin:admin@localhost:5433/mypass"
-            .to_string()
-            .into(),
-        jwt_secret: "my_jwt_secret_for_tests_only".to_string().into(),
     }
 }
 
-pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Error> {
+#[allow(dead_code)]
+pub fn default_test_secrets_manager() -> FakeSecretsManager {
+    let mut secrets = HashMap::new();
+    secrets.insert(
+        SecretKey::DatabaseUrl,
+        "postgresql://admin:admin@localhost:5433/mypass"
+            .to_string()
+            .into(),
+    );
+    secrets.insert(
+        SecretKey::JwtSecret,
+        "my_jwt_secret_for_tests_only".to_string().into(),
+    );
+
+    FakeSecretsManager { secrets }
+}
+
+pub async fn setup_instance(
+    config: Config,
+    secrets_manager: impl SecretsManager,
+) -> Result<InstanceState, anyhow::Error> {
     let _ = tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer().with_filter(LevelFilter::from_level(config.log_level)),
@@ -49,7 +67,15 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
     let pool = match PgPoolOptions::new()
         .max_connections(5)
         .acquire_timeout(Duration::from_secs(5))
-        .connect(config.database_url.unsafe_inner())
+        .connect(
+            secrets_manager
+                .get(SecretKey::DatabaseUrl)
+                .map_err(|e| {
+                    anyhow::anyhow!("{e}")
+                        .context("Failed to get database URL from secrets manager")
+                })?
+                .unsafe_inner(),
+        )
         .await
     {
         Ok(c) => c,
@@ -70,7 +96,12 @@ pub async fn setup_instance(config: Config) -> Result<InstanceState, anyhow::Err
         my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool);
     let accounts_notifier = FakeAccountsNotifier::new();
 
-    let app = app_router(&config, accounts_repository, accounts_notifier.clone()).layer(
+    let app = app_router(
+        secrets_manager,
+        accounts_repository,
+        accounts_notifier.clone(),
+    )
+    .layer(
         TraceLayer::new_for_http()
             .make_span_with(|request: &Request<_>| {
                 let matched_path = request
@@ -129,6 +160,19 @@ async fn bind_listener_to_free_port() -> Result<tokio::net::TcpListener, anyhow:
     Err(anyhow::anyhow!(
         "No free port found in the range 51000-60000"
     ))
+}
+
+pub struct FakeSecretsManager {
+    secrets: HashMap<SecretKey, Opaque<String>>,
+}
+
+impl SecretsManager for FakeSecretsManager {
+    fn get(&self, k: SecretKey) -> Result<Opaque<String>, SecretsManagerError> {
+        self.secrets
+            .get(&k)
+            .cloned()
+            .ok_or(SecretsManagerError::NotFound)
+    }
 }
 
 #[derive(Clone, Debug)]
