@@ -9,9 +9,13 @@ use my_pass::routes::accounts::{
     UseVerificationTicketRequestHttpBody,
 };
 
+use crate::common::default_test_secrets_manager;
+
 #[tokio::test]
 async fn test_me() {
-    let instance_state = setup_instance(default_test_config()).await.unwrap();
+    let instance_state = setup_instance(default_test_config(), default_test_secrets_manager())
+        .await
+        .unwrap();
 
     let signup_body = Faker.fake::<SignUpRequestHttpBody>();
 
@@ -112,7 +116,9 @@ async fn test_me() {
 
 #[tokio::test]
 async fn test_me_unauthorized() {
-    let instance_state = setup_instance(default_test_config()).await.unwrap();
+    let instance_state = setup_instance(default_test_config(), default_test_secrets_manager())
+        .await
+        .unwrap();
 
     assert_eq!(
         instance_state

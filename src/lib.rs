@@ -8,6 +8,7 @@ mod argon2instance;
 pub mod domains;
 pub mod newtypes;
 pub mod routes;
+pub mod secrets;
 
 // ############################################
 // ################## CONFIG ##################
@@ -27,7 +28,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn parse_environment() -> Result<Self, Vec<anyhow::Error>> {
+    pub fn new_from_env() -> Result<Self, Vec<anyhow::Error>> {
         let mut errors = Vec::new();
 
         let port = match parse_env_variable::<u16>("PORT") {

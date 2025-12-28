@@ -1,12 +1,17 @@
 use std::time::Duration;
 
+use anyhow::anyhow;
 use axum::{
     body::Body,
     extract::{MatchedPath, Request},
     http::{HeaderName, Response, StatusCode},
 };
 use dotenvy::dotenv;
-use my_pass::{Config, routes::app_router};
+use my_pass::{
+    Config,
+    routes::app_router,
+    secrets::{InMemorySecretsManager, SecretKey, SecretsManager},
+};
 use sqlx::postgres::PgPoolOptions;
 use tokio::signal;
 use tower_http::{
@@ -27,7 +32,7 @@ async fn main() -> Result<(), anyhow::Error> {
         return Err(anyhow::anyhow!("Error while loading .env file: {err}"));
     }
 
-    let config = match Config::parse_environment() {
+    let config = match Config::new_from_env() {
         Ok(c) => c,
         Err(errors) => {
             return Err(anyhow::anyhow!(
@@ -48,10 +53,29 @@ async fn main() -> Result<(), anyhow::Error> {
         )
         .init();
 
+    let secrets_manager = match InMemorySecretsManager::new_from_env() {
+        Ok(m) => m,
+        Err(errors) => {
+            return Err(anyhow::anyhow!(
+                "Failed to parse environment variables for secrets with errors: {}",
+                errors
+                    .into_iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ));
+        }
+    };
+
     let pool = match PgPoolOptions::new()
         .max_connections(5)
         .acquire_timeout(Duration::from_secs(5))
-        .connect(config.database_url.unsafe_inner())
+        .connect(
+            secrets_manager
+                .get(SecretKey::DatabaseUrl)
+                .map_err(|e| anyhow!("{e}").context("fail to build database connection pool"))?
+                .unsafe_inner(),
+        )
         .await
     {
         Ok(c) => c,
@@ -76,7 +100,13 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let x_request_id = HeaderName::from_static(REQUEST_ID_HEADER);
 
-    let app = app_router(&config, accounts_repository, accounts_notifier).layer((
+    let app = app_router(
+        &config,
+        secrets_manager,
+        accounts_repository,
+        accounts_notifier,
+    )
+    .layer((
         // Set `x-request-id` header for every request
         SetRequestIdLayer::new(x_request_id.clone(), MakeRequestUuid),
         // Log request and response

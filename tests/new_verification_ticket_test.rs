@@ -5,9 +5,13 @@ mod common;
 use common::{default_test_config, setup_instance};
 use my_pass::routes::accounts::{NewVerificationTicketRequestHttpBody, SignUpRequestHttpBody};
 
+use crate::common::default_test_secrets_manager;
+
 #[tokio::test]
 async fn test_new_verification_ticket_too_soon() {
-    let instance_state = setup_instance(default_test_config()).await.unwrap();
+    let instance_state = setup_instance(default_test_config(), default_test_secrets_manager())
+        .await
+        .unwrap();
 
     let signup_body = Faker.fake::<SignUpRequestHttpBody>();
 

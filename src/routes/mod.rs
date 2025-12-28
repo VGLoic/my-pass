@@ -15,6 +15,7 @@ use crate::{
     Config,
     domains::accounts::{notifier::AccountsNotifier, repository::AccountsRepository},
     newtypes::Opaque,
+    secrets::SecretsManager,
 };
 
 pub mod accounts;
@@ -22,10 +23,12 @@ mod jwt;
 
 pub fn app_router(
     config: &Config,
+    secrets_manager: impl SecretsManager,
     accounts_repository: impl AccountsRepository,
     accounts_notifier: impl AccountsNotifier,
 ) -> Router {
     let app_state = AppState {
+        secrets_manager: Arc::new(secrets_manager),
         accounts_repository: Arc::new(accounts_repository),
         accounts_notifier: Arc::new(accounts_notifier),
         jwt_secret: config.jwt_secret.clone(),
@@ -39,6 +42,7 @@ pub fn app_router(
 
 #[derive(Clone)]
 pub struct AppState {
+    secrets_manager: Arc<dyn SecretsManager>,
     accounts_repository: Arc<dyn AccountsRepository>,
     accounts_notifier: Arc<dyn AccountsNotifier>,
     jwt_secret: Opaque<String>,
