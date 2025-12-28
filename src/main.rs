@@ -73,7 +73,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .connect(
             secrets_manager
                 .get(SecretKey::DatabaseUrl)
-                .map_err(|e| anyhow!("{e}").context("fail to build database connection pool"))?
+                .map_err(|e| anyhow!("{e}").context("Failed to build database connection pool"))?
                 .unsafe_inner(),
         )
         .await
