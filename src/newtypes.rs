@@ -4,8 +4,6 @@ use sqlx::{Database, Decode, Encode, Type};
 use std::fmt::Debug;
 use validator::ValidateEmail;
 
-use super::crypto;
-
 // #######################################################
 // #################### OPAQUE STRING ####################
 // #######################################################
@@ -334,19 +332,6 @@ impl Password {
         }
 
         Ok(Password(v.to_string()))
-    }
-
-    /// Hash a password using the Argon2id algorithm. The returned string is a argon2-formatted hash.
-    pub fn hash(&self) -> Result<String, anyhow::Error> {
-        crypto::hash_password(&self.0)
-    }
-
-    /// Verify a password validity against an Argon2id formatted key
-    ///
-    /// # Arguments
-    /// * `password_hash` - Argon2id formatted hash to verify against
-    pub fn verify(&self, password_hash: &str) -> Result<(), anyhow::Error> {
-        crypto::verify_password(password_hash, &self.0)
     }
 
     /// Reference the inner value
