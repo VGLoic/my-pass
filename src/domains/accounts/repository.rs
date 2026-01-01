@@ -130,9 +130,9 @@ impl AccountsRepository for PsqlAccountsRepository {
             INSERT INTO account (
                 email,
                 password_hash,
-                symmetric_key_salt,
-                encrypted_private_key_nonce,
-                encrypted_private_key,
+                private_key_symmetric_key_salt,
+                private_key_encryption_nonce,
+                private_key_ciphertext,
                 public_key
             ) VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING
@@ -140,9 +140,9 @@ impl AccountsRepository for PsqlAccountsRepository {
                 email,
                 password_hash,
                 verified,
-                symmetric_key_salt,
-                encrypted_private_key_nonce,
-                encrypted_private_key,
+                private_key_symmetric_key_salt,
+                private_key_encryption_nonce,
+                private_key_ciphertext,
                 public_key,
                 last_login_at,
                 created_at,
@@ -151,9 +151,9 @@ impl AccountsRepository for PsqlAccountsRepository {
         )
         .bind(&signup_request.email)
         .bind(&signup_request.password_hash)
-        .bind(&signup_request.symmetric_key_salt)
-        .bind(&signup_request.encrypted_private_key_nonce)
-        .bind(&signup_request.encrypted_private_key)
+        .bind(&signup_request.encrypted_key_material.symmetric_key_salt)
+        .bind(&signup_request.encrypted_key_material.encryption_nonce)
+        .bind(&signup_request.encrypted_key_material.ciphertext)
         .bind(&signup_request.public_key)
         .fetch_one(&mut *transaction)
         .await
@@ -280,9 +280,9 @@ impl AccountsRepository for PsqlAccountsRepository {
                 email,
                 password_hash,
                 verified,
-                symmetric_key_salt,
-                encrypted_private_key_nonce,
-                encrypted_private_key,
+                private_key_symmetric_key_salt,
+                private_key_encryption_nonce,
+                private_key_ciphertext,
                 public_key,
                 last_login_at,
                 created_at,
@@ -314,9 +314,9 @@ impl AccountsRepository for PsqlAccountsRepository {
                 email,
                 password_hash,
                 verified,
-                symmetric_key_salt,
-                encrypted_private_key_nonce,
-                encrypted_private_key,
+                private_key_symmetric_key_salt,
+                private_key_encryption_nonce,
+                private_key_ciphertext,
                 public_key,
                 last_login_at,
                 created_at,
@@ -348,9 +348,9 @@ impl AccountsRepository for PsqlAccountsRepository {
                 a.email,
                 a.password_hash,
                 a.verified,
-                a.symmetric_key_salt,
-                a.encrypted_private_key_nonce,
-                a.encrypted_private_key,
+                a.private_key_symmetric_key_salt,
+                a.private_key_encryption_nonce,
+                a.private_key_ciphertext,
                 a.public_key,
                 a.last_login_at,
                 a.created_at,
@@ -389,14 +389,16 @@ impl AccountsRepository for PsqlAccountsRepository {
                     verified: row
                         .try_get(3)
                         .map_err(|e| anyhow::Error::new(e).context("parsing account verified"))?,
-                    symmetric_key_salt: row.try_get(4).map_err(|e| {
-                        anyhow::Error::new(e).context("parsing account symmetric_key_salt")
+                    private_key_symmetric_key_salt: row.try_get(4).map_err(|e| {
+                        anyhow::Error::new(e)
+                            .context("parsing account private_key_symmetric_key_salt")
                     })?,
-                    encrypted_private_key_nonce: row.try_get(5).map_err(|e| {
-                        anyhow::Error::new(e).context("parsing account encrypted_private_key_nonce")
+                    private_key_encryption_nonce: row.try_get(5).map_err(|e| {
+                        anyhow::Error::new(e)
+                            .context("parsing account private_key_encryption_nonce")
                     })?,
-                    encrypted_private_key: row.try_get(6).map_err(|e| {
-                        anyhow::Error::new(e).context("parsing account encrypted_private_key")
+                    private_key_ciphertext: row.try_get(6).map_err(|e| {
+                        anyhow::Error::new(e).context("parsing account private_key_ciphertext")
                     })?,
                     public_key: row
                         .try_get(7)

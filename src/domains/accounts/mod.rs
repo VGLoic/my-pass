@@ -1,4 +1,7 @@
-use crate::newtypes::{Email, Opaque};
+use crate::{
+    crypto::EncryptedKeyMaterial,
+    newtypes::{Email, Opaque},
+};
 use base64::{Engine, prelude::BASE64_URL_SAFE};
 use sqlx::prelude::FromRow;
 use thiserror::Error;
@@ -17,9 +20,9 @@ pub struct Account {
     #[allow(dead_code)]
     pub password_hash: Opaque<String>,
     pub verified: bool,
-    pub symmetric_key_salt: Opaque<[u8; 16]>,
-    pub encrypted_private_key_nonce: Opaque<[u8; 12]>,
-    pub encrypted_private_key: Opaque<String>,
+    pub private_key_symmetric_key_salt: Opaque<[u8; 16]>,
+    pub private_key_encryption_nonce: Opaque<[u8; 12]>,
+    pub private_key_ciphertext: Opaque<Vec<u8>>,
     pub public_key: Opaque<[u8; 32]>,
     pub last_login_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -45,9 +48,7 @@ pub struct VerificationTicket {
 pub struct SignupRequest {
     pub email: Email,
     pub password_hash: Opaque<String>,
-    pub symmetric_key_salt: Opaque<[u8; 16]>,
-    pub encrypted_private_key_nonce: Opaque<[u8; 12]>,
-    pub encrypted_private_key: Opaque<String>,
+    pub encrypted_key_material: EncryptedKeyMaterial,
     pub public_key: Opaque<[u8; 32]>,
     pub verification_ticket_token: Opaque<String>,
     pub verification_ticket_expires_at: chrono::DateTime<chrono::Utc>,
@@ -61,10 +62,10 @@ pub enum SignupRequestError {
     InvalidPasswordFormat(String),
     #[error("Invalid symmetric key salt format: {0}")]
     InvalidSymmetricKeySaltFormat(String),
-    #[error("Invalid encrypted private key nonce format: {0}")]
-    InvalidEncryptedPrivateKeyNonceFormat(String),
-    #[error("Invalid encrypted private key format: {0}")]
-    InvalidEncryptedPrivateKeyFormat(String),
+    #[error("Invalid encryption nonce format: {0}")]
+    InvalidEncryptionNonceFormat(String),
+    #[error("Invalid private key ciphertext format: {0}")]
+    InvalidPrivateKeyCiphertextFormat(String),
     #[error("Invalid public key format: {0}")]
     InvalidPublicKeyFormat(String),
     #[error("Invalid key pair or nonce")]
@@ -78,9 +79,7 @@ impl SignupRequest {
     pub fn new(
         email: Email,
         password_hash: Opaque<String>,
-        symmetric_key_salt: Opaque<[u8; 16]>,
-        encrypted_private_key_nonce: Opaque<[u8; 12]>,
-        encrypted_private_key: Opaque<String>,
+        encrypted_key_material: EncryptedKeyMaterial,
         public_key: Opaque<[u8; 32]>,
         verification_ticket_token: Opaque<[u8; 32]>,
         verification_ticket_lifetime: chrono::Duration,
@@ -92,9 +91,7 @@ impl SignupRequest {
         SignupRequest {
             email,
             password_hash,
-            symmetric_key_salt,
-            encrypted_private_key_nonce,
-            encrypted_private_key,
+            encrypted_key_material,
             public_key,
             verification_ticket_token: verification_ticket_token.into(),
             verification_ticket_expires_at,

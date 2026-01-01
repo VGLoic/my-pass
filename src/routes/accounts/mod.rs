@@ -1,15 +1,10 @@
 use crate::{
-    crypto::{argon2_instance, hash_password, verify_password},
+    crypto::{EncryptedKeyMaterial, KeyMaterial, hash_password, verify_password},
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
     secrets,
 };
 
 use super::{ApiError, AppState, AuthorizedAccount, jwt};
-use aes_gcm::{
-    Aes256Gcm, Key, KeyInit,
-    aead::{Aead, Nonce},
-};
-use anyhow::anyhow;
 use axum::{
     Json, Router,
     extract::State,
@@ -20,7 +15,6 @@ use base64::{
     Engine,
     prelude::{BASE64_STANDARD, BASE64_URL_SAFE},
 };
-use ed25519_dalek::SigningKey;
 use fake::{Dummy, Fake, Faker, rand};
 use serde::{Deserialize, Serialize};
 
@@ -60,11 +54,11 @@ async fn sign_up(
         SignupRequestError::InvalidSymmetricKeySaltFormat(msg) => {
             ApiError::BadRequest(format!("invalid symmetric key salt format: {msg}"))
         }
-        SignupRequestError::InvalidEncryptedPrivateKeyNonceFormat(msg) => {
-            ApiError::BadRequest(format!("invalid encrypted private key nonce format: {msg}"))
+        SignupRequestError::InvalidEncryptionNonceFormat(msg) => {
+            ApiError::BadRequest(format!("invalid encryption nonce format: {msg}"))
         }
-        SignupRequestError::InvalidEncryptedPrivateKeyFormat(msg) => {
-            ApiError::BadRequest(format!("invalid encrypted private key format: {msg}"))
+        SignupRequestError::InvalidPrivateKeyCiphertextFormat(msg) => {
+            ApiError::BadRequest(format!("invalid ciphertext format: {msg}"))
         }
         SignupRequestError::InvalidPublicKeyFormat(msg) => {
             ApiError::BadRequest(format!("invalid public key format: {msg}"))
@@ -103,15 +97,22 @@ pub struct SignUpRequestHttpBody {
     pub email: String,
     /// Password of the user
     pub password: Opaque<String>,
+    /// Encrypted private key material, contains the salt, nonce and ciphertext, all base64 encoded. See [EncryptedPrivateKeyHttpBody]
+    pub encrypted_key_material: EncryptedKeyMaterialHttpBody,
+    /// Public key of the user, must be base64 encoded
+    pub public_key: Opaque<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedKeyMaterialHttpBody {
     /// Salt used for deriving the symmetric key from the password, must be base64 encoded
     pub symmetric_key_salt: Opaque<String>,
     /// Nonce used for the encryption of the private key, must be 12 bytes encoded in base64
-    pub encrypted_private_key_nonce: Opaque<String>,
+    pub encryption_nonce: Opaque<String>,
     /// Encrypted Ed25519 private key of the user using AES-256-GCM with a key derived from the password and symmetric_key_salt, the used nonce is `encryptedPrivateKeyNonce`.
     /// It must be base64 encoded
-    pub encrypted_private_key: Opaque<String>,
-    /// Public key of the user, must be base64 encoded
-    pub public_key: Opaque<String>,
+    pub ciphertext: Opaque<String>,
 }
 
 impl SignUpRequestHttpBody {
@@ -134,7 +135,11 @@ impl SignUpRequestHttpBody {
         })?;
 
         let decoded_symmetric_key_salt = BASE64_STANDARD
-            .decode(self.symmetric_key_salt.unsafe_inner())
+            .decode(
+                self.encrypted_key_material
+                    .symmetric_key_salt
+                    .unsafe_inner(),
+            )
             .map_err(|e| {
                 SignupRequestError::InvalidSymmetricKeySaltFormat(format!(
                     "Invalid base64 format: {}",
@@ -148,26 +153,25 @@ impl SignUpRequestHttpBody {
         }
         let decoded_symmetric_key_salt: [u8; 16] = slice_to_array(&decoded_symmetric_key_salt);
 
-        let decoded_encrypted_private_key_nonce = BASE64_STANDARD
-            .decode(self.encrypted_private_key_nonce.unsafe_inner())
+        let decoded_encryption_nonce = BASE64_STANDARD
+            .decode(self.encrypted_key_material.encryption_nonce.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidEncryptedPrivateKeyNonceFormat(format!(
+                SignupRequestError::InvalidEncryptionNonceFormat(format!(
                     "Invalid base64 format: {}",
                     e
                 ))
             })?;
-        if decoded_encrypted_private_key_nonce.len() != 12 {
-            return Err(SignupRequestError::InvalidEncryptedPrivateKeyNonceFormat(
-                "Encrypted private key nonce must be 12 bytes long".to_string(),
+        if decoded_encryption_nonce.len() != 12 {
+            return Err(SignupRequestError::InvalidEncryptionNonceFormat(
+                "Encryption nonce must be 12 bytes long".to_string(),
             ));
         }
-        let decoded_encrypted_private_key_nonce: [u8; 12] =
-            slice_to_array(&decoded_encrypted_private_key_nonce);
+        let decoded_encryption_nonce: [u8; 12] = slice_to_array(&decoded_encryption_nonce);
 
         let decoded_encrypted_private_key = BASE64_STANDARD
-            .decode(self.encrypted_private_key.unsafe_inner())
+            .decode(self.encrypted_key_material.ciphertext.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidEncryptedPrivateKeyFormat(format!(
+                SignupRequestError::InvalidPrivateKeyCiphertextFormat(format!(
                     "Invalid base64 format: {}",
                     e
                 ))
@@ -184,16 +188,13 @@ impl SignUpRequestHttpBody {
             ));
         }
         let decoded_public_key: [u8; 32] = slice_to_array(&decoded_public_key);
+        let encrypted_key_material = EncryptedKeyMaterial::new(
+            decoded_symmetric_key_salt.into(),
+            decoded_encryption_nonce.into(),
+            decoded_encrypted_private_key.into(),
+        );
 
-        if verify_key_material(
-            &password,
-            &decoded_symmetric_key_salt,
-            &decoded_encrypted_private_key_nonce,
-            &decoded_encrypted_private_key,
-            &decoded_public_key,
-        )
-        .is_err()
-        {
+        if KeyMaterial::verify(&password, &encrypted_key_material, &decoded_public_key).is_err() {
             return Err(SignupRequestError::InvalidKeyPair);
         }
 
@@ -208,59 +209,12 @@ impl SignUpRequestHttpBody {
         Ok(SignupRequest::new(
             email,
             password_hash.into(),
-            Opaque::new(decoded_symmetric_key_salt),
-            Opaque::new(decoded_encrypted_private_key_nonce),
-            self.encrypted_private_key,
+            encrypted_key_material,
             Opaque::new(decoded_public_key),
             verification_ticket_token.into(),
             verification_ticket_lifetime,
         ))
     }
-}
-
-fn verify_key_material(
-    password: &Password,
-    symmetric_key_salt: &[u8; 16],
-    encrypted_private_key_nonce: &[u8; 12],
-    encrypted_private_key: &[u8],
-    public_key: &[u8; 32],
-) -> Result<(), anyhow::Error> {
-    let mut symmetric_key_material = [0u8; 32];
-    argon2_instance()
-        .hash_password_into(
-            password.unsafe_inner().as_bytes(),
-            symmetric_key_salt,
-            &mut symmetric_key_material,
-        )
-        .map_err(|e| anyhow!("{e}").context("Failed to generate symmetric key material"))?;
-
-    let aes_gcm_key = Key::<Aes256Gcm>::from_slice(&symmetric_key_material);
-    let cipher = Aes256Gcm::new(aes_gcm_key);
-
-    let encrypted_private_key_nonce_aes_formatted =
-        Nonce::<Aes256Gcm>::from_slice(encrypted_private_key_nonce);
-
-    let decrypted_private_key = cipher
-        .decrypt(
-            encrypted_private_key_nonce_aes_formatted,
-            encrypted_private_key,
-        )
-        .map_err(|e| anyhow!("{e}").context("Failed to decrypt private key"))?;
-
-    if decrypted_private_key.len() != 32 {
-        return Err(anyhow!("Invalid decrypted private key length"));
-    }
-
-    let decrypted_private_key: [u8; 32] = slice_to_array(&decrypted_private_key);
-
-    let ed25519_secret_key = SigningKey::from_bytes(&decrypted_private_key);
-    let ed25519_public_key = ed25519_secret_key.verifying_key();
-
-    if ed25519_public_key.to_bytes().as_slice() != public_key.as_slice() {
-        return Err(anyhow!("Public key does not match decrypted private key"));
-    }
-
-    Ok(())
 }
 
 fn slice_to_array<const N: usize>(slice: &[u8]) -> [u8; N] {
@@ -274,42 +228,25 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
         let email: Email = Faker.fake_with_rng(rng);
         let password: Password = Faker.fake_with_rng(rng);
 
-        let private_key_bytes: [u8; 32] = Faker.fake_with_rng(rng);
-        let ed25519_secret_key = SigningKey::from_bytes(&private_key_bytes);
-        let ed25519_public_key = ed25519_secret_key.verifying_key();
-        let public_key_b64 = BASE64_STANDARD.encode(ed25519_public_key.to_bytes());
+        let key_material = KeyMaterial::generate(&password).unwrap();
 
-        let symmetric_key_salt_bytes: [u8; 16] = Faker.fake_with_rng(rng);
-        let symmetric_key_salt_b64 = BASE64_STANDARD.encode(symmetric_key_salt_bytes);
-
-        let mut symmetric_key_material = [0u8; 32];
-        argon2_instance()
-            .hash_password_into(
-                password.unsafe_inner().as_bytes(),
-                &symmetric_key_salt_bytes,
-                &mut symmetric_key_material,
-            )
-            .unwrap();
-        let aes_gcm_key = Key::<Aes256Gcm>::from_slice(&symmetric_key_material);
-        let cipher = Aes256Gcm::new(aes_gcm_key);
-
-        let encrypted_private_key_nonce_bytes: [u8; 12] = Faker.fake_with_rng(rng);
-        let encrypted_private_key_nonce =
-            Nonce::<Aes256Gcm>::from_slice(&encrypted_private_key_nonce_bytes);
-        let encrypted_private_key = cipher
-            .encrypt(encrypted_private_key_nonce, private_key_bytes.as_ref())
-            .unwrap();
-        let encrypted_private_key_b64 = BASE64_STANDARD.encode(encrypted_private_key);
-        let encrypted_private_key_nonce_b64 =
-            BASE64_STANDARD.encode(encrypted_private_key_nonce_bytes);
+        let public_key = BASE64_STANDARD.encode(key_material.public_key().as_bytes());
 
         SignUpRequestHttpBody {
             email: email.to_string(),
             password: password.unsafe_inner().to_owned().into(),
-            symmetric_key_salt: symmetric_key_salt_b64.into(),
-            encrypted_private_key: encrypted_private_key_b64.into(),
-            encrypted_private_key_nonce: encrypted_private_key_nonce_b64.into(),
-            public_key: public_key_b64.into(),
+            encrypted_key_material: EncryptedKeyMaterialHttpBody {
+                symmetric_key_salt: BASE64_STANDARD
+                    .encode(key_material.encrypted.symmetric_key_salt.unsafe_inner())
+                    .into(),
+                ciphertext: BASE64_STANDARD
+                    .encode(key_material.encrypted.ciphertext.unsafe_inner())
+                    .into(),
+                encryption_nonce: BASE64_STANDARD
+                    .encode(key_material.encrypted.encryption_nonce.unsafe_inner())
+                    .into(),
+            },
+            public_key: public_key.into(),
         }
     }
 }
@@ -676,24 +613,33 @@ async fn get_me(
 #[serde(rename_all = "camelCase")]
 pub struct MeResponse {
     pub email: String,
-    pub symmetric_key_salt: Opaque<String>,
-    pub encrypted_private_key_nonce: Opaque<String>,
-    pub encrypted_private_key: Opaque<String>,
+    pub encrypted_key_material: EncryptedKeyMaterialResponse,
     pub public_key: Opaque<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EncryptedKeyMaterialResponse {
+    pub symmetric_key_salt: Opaque<String>,
+    pub encryption_nonce: Opaque<String>,
+    pub ciphertext: Opaque<String>,
 }
 
 impl From<Account> for MeResponse {
     fn from(account: Account) -> Self {
         MeResponse {
             email: account.email.to_string(),
-            symmetric_key_salt: BASE64_STANDARD
-                .encode(account.symmetric_key_salt.unsafe_inner())
-                .into(),
-            encrypted_private_key_nonce: BASE64_STANDARD
-                .encode(account.encrypted_private_key_nonce.unsafe_inner())
-                .into(),
-            encrypted_private_key: account.encrypted_private_key,
+            encrypted_key_material: EncryptedKeyMaterialResponse {
+                symmetric_key_salt: BASE64_STANDARD
+                    .encode(account.private_key_symmetric_key_salt.unsafe_inner())
+                    .into(),
+                encryption_nonce: BASE64_STANDARD
+                    .encode(account.private_key_encryption_nonce.unsafe_inner())
+                    .into(),
+                ciphertext: BASE64_STANDARD
+                    .encode(account.private_key_ciphertext.unsafe_inner())
+                    .into(),
+            },
             public_key: BASE64_STANDARD
                 .encode(account.public_key.unsafe_inner())
                 .into(),
@@ -733,26 +679,49 @@ mod tests {
                 .as_slice()
         );
         assert_eq!(
-            signup_request.symmetric_key_salt.unsafe_inner(),
-            BASE64_STANDARD
-                .decode(http_signup_request.symmetric_key_salt.unsafe_inner())
-                .unwrap()
-                .as_slice()
-        );
-        assert_eq!(
-            signup_request.encrypted_private_key_nonce.unsafe_inner(),
+            signup_request
+                .encrypted_key_material
+                .symmetric_key_salt
+                .unsafe_inner(),
             BASE64_STANDARD
                 .decode(
                     http_signup_request
-                        .encrypted_private_key_nonce
+                        .encrypted_key_material
+                        .symmetric_key_salt
                         .unsafe_inner()
                 )
                 .unwrap()
                 .as_slice()
         );
         assert_eq!(
-            signup_request.encrypted_private_key.unsafe_inner(),
-            http_signup_request.encrypted_private_key.unsafe_inner()
+            signup_request
+                .encrypted_key_material
+                .encryption_nonce
+                .unsafe_inner(),
+            BASE64_STANDARD
+                .decode(
+                    http_signup_request
+                        .encrypted_key_material
+                        .encryption_nonce
+                        .unsafe_inner()
+                )
+                .unwrap()
+                .as_slice()
+        );
+        assert_eq!(
+            signup_request
+                .encrypted_key_material
+                .ciphertext
+                .unsafe_inner(),
+            BASE64_STANDARD
+                .decode(
+                    http_signup_request
+                        .encrypted_key_material
+                        .ciphertext
+                        .unsafe_inner()
+                )
+                .unwrap()
+                .as_slice()
         );
         let password = Password::new(http_signup_request.password.unsafe_inner()).unwrap();
         assert!(verify_password(&signup_request.password_hash, &password).is_ok());
@@ -793,7 +762,8 @@ mod tests {
     #[test]
     fn test_invalid_symmetric_key_salt_base64_signup_request() {
         let mut signup_request: SignUpRequestHttpBody = Faker.fake();
-        signup_request.symmetric_key_salt = Opaque::new("invalid-base64".to_string());
+        signup_request.encrypted_key_material.symmetric_key_salt =
+            Opaque::new("invalid-base64".to_string());
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
@@ -806,7 +776,7 @@ mod tests {
     fn test_invalid_symmetric_key_salt_wrong_length_signup_request() {
         let mut signup_request: SignUpRequestHttpBody = Faker.fake();
         let invalid_salt = BASE64_STANDARD.encode(vec![0u8; 10]); // 10 bytes instead of 16
-        signup_request.symmetric_key_salt = Opaque::new(invalid_salt);
+        signup_request.encrypted_key_material.symmetric_key_salt = Opaque::new(invalid_salt);
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
@@ -816,39 +786,41 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_encrypted_private_key_nonce_base64_signup_request() {
+    fn test_invalid_encryption_nonce_base64_signup_request() {
         let mut signup_request: SignUpRequestHttpBody = Faker.fake();
-        signup_request.encrypted_private_key_nonce = Opaque::new("invalid-base64".to_string());
+        signup_request.encrypted_key_material.encryption_nonce =
+            Opaque::new("invalid-base64".to_string());
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidEncryptedPrivateKeyNonceFormat(_) => {}
-            _ => panic!("Expected InvalidEncryptedPrivateKeyNonceFormat error"),
+            SignupRequestError::InvalidEncryptionNonceFormat(_) => {}
+            _ => panic!("Expected InvalidEncryptionNonceFormat error"),
         };
     }
 
     #[test]
-    fn test_invalid_encrypted_private_key_nonce_wrong_length_signup_request() {
+    fn test_invalid_encryption_nonce_wrong_length_signup_request() {
         let mut signup_request: SignUpRequestHttpBody = Faker.fake();
         let invalid_nonce = BASE64_STANDARD.encode(vec![0u8; 10]); // 10 bytes instead of 12
-        signup_request.encrypted_private_key_nonce = Opaque::new(invalid_nonce);
+        signup_request.encrypted_key_material.encryption_nonce = Opaque::new(invalid_nonce);
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidEncryptedPrivateKeyNonceFormat(_) => {}
-            _ => panic!("Expected InvalidEncryptedPrivateKeyNonceFormat error"),
+            SignupRequestError::InvalidEncryptionNonceFormat(_) => {}
+            _ => panic!("Expected InvalidEncryptionNonceFormat error"),
         };
     }
 
     #[test]
     fn test_invalid_encrypted_private_key_base64_signup_request() {
         let mut signup_request: SignUpRequestHttpBody = Faker.fake();
-        signup_request.encrypted_private_key = Opaque::new("invalid-base64".to_string());
+        signup_request.encrypted_key_material.ciphertext =
+            Opaque::new("invalid-base64".to_string());
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidEncryptedPrivateKeyFormat(_) => {}
-            _ => panic!("Expected InvalidEncryptedPrivateKeyFormat error"),
+            SignupRequestError::InvalidPrivateKeyCiphertextFormat(_) => {}
+            _ => panic!("Expected InvalidPrivateKeyCiphertextFormat error"),
         };
     }
 
@@ -882,9 +854,14 @@ mod tests {
     fn test_invalid_encrypted_private_key() {
         let mut signup_request: SignUpRequestHttpBody = Faker.fake();
         // Corrupt the encrypted private key by changing a character
-        let corrupted_encrypted_private_key =
-            flip_first_byte(signup_request.encrypted_private_key.unsafe_inner());
-        signup_request.encrypted_private_key = Opaque::new(corrupted_encrypted_private_key);
+        let corrupted_encrypted_private_key = flip_first_byte(
+            signup_request
+                .encrypted_key_material
+                .ciphertext
+                .unsafe_inner(),
+        );
+        signup_request.encrypted_key_material.ciphertext =
+            Opaque::new(corrupted_encrypted_private_key);
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
@@ -894,13 +871,17 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_encrypted_private_key_nonce() {
+    fn test_invalid_encryption_nonce() {
         let mut signup_request: SignUpRequestHttpBody = Faker.fake();
         // Corrupt the encrypted private key nonce by changing a character
-        let corrupted_encrypted_private_key_nonce =
-            flip_first_byte(signup_request.encrypted_private_key_nonce.unsafe_inner());
-        signup_request.encrypted_private_key_nonce =
-            Opaque::new(corrupted_encrypted_private_key_nonce);
+        let corrupted_encryption_nonce = flip_first_byte(
+            signup_request
+                .encrypted_key_material
+                .encryption_nonce
+                .unsafe_inner(),
+        );
+        signup_request.encrypted_key_material.encryption_nonce =
+            Opaque::new(corrupted_encryption_nonce);
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
@@ -1113,9 +1094,9 @@ mod tests {
             email: Faker.fake(),
             password_hash: hash_password(&password).unwrap().into(),
             verified: false,
-            symmetric_key_salt: Opaque::new(Faker.fake::<[u8; 16]>()),
-            encrypted_private_key_nonce: Opaque::new(Faker.fake::<[u8; 12]>()),
-            encrypted_private_key: Opaque::new(BASE64_STANDARD.encode(vec![0u8; 64])),
+            private_key_symmetric_key_salt: Opaque::new(Faker.fake::<[u8; 16]>()),
+            private_key_encryption_nonce: Opaque::new(Faker.fake::<[u8; 12]>()),
+            private_key_ciphertext: Opaque::new(vec![0u8; 64]),
             public_key: Opaque::new(Faker.fake::<[u8; 32]>()),
             last_login_at: None,
             created_at: chrono::Utc::now(),

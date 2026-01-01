@@ -97,16 +97,31 @@ async fn test_me() {
     let me_response_body = me_response.json::<MeResponse>().await.unwrap();
     assert_eq!(me_response_body.email, signup_body.email);
     assert_eq!(
-        me_response_body.encrypted_private_key.unsafe_inner(),
-        signup_body.encrypted_private_key.unsafe_inner()
+        me_response_body
+            .encrypted_key_material
+            .ciphertext
+            .unsafe_inner(),
+        signup_body.encrypted_key_material.ciphertext.unsafe_inner()
     );
     assert_eq!(
-        me_response_body.symmetric_key_salt.unsafe_inner(),
-        signup_body.symmetric_key_salt.unsafe_inner()
+        me_response_body
+            .encrypted_key_material
+            .symmetric_key_salt
+            .unsafe_inner(),
+        signup_body
+            .encrypted_key_material
+            .symmetric_key_salt
+            .unsafe_inner()
     );
     assert_eq!(
-        me_response_body.encrypted_private_key_nonce.unsafe_inner(),
-        signup_body.encrypted_private_key_nonce.unsafe_inner()
+        me_response_body
+            .encrypted_key_material
+            .encryption_nonce
+            .unsafe_inner(),
+        signup_body
+            .encrypted_key_material
+            .encryption_nonce
+            .unsafe_inner()
     );
     assert_eq!(
         me_response_body.public_key.unsafe_inner(),

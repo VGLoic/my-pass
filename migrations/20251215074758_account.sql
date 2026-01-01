@@ -3,18 +3,18 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "moddatetime";
 
 CREATE TABLE "account" (
-    id                          UUID        NOT NULL    PRIMARY KEY DEFAULT uuid_generate_v4 (),
+    id                                      UUID        NOT NULL    PRIMARY KEY DEFAULT uuid_generate_v4 (),
     -- The UNIQUE constraint on email creates an index, which is relied upon for primary account lookups.
-    email                       TEXT        NOT NULL    UNIQUE,
-    password_hash               TEXT        NOT NULL,
-    verified                    BOOLEAN     NOT NULL    DEFAULT FALSE,
-    symmetric_key_salt          BYTEA       NOT NULL,
-    encrypted_private_key_nonce BYTEA       NOT NULL,
-    encrypted_private_key       TEXT        NOT NULL,
-    public_key                  BYTEA       NOT NULL,
-    last_login_at               TIMESTAMPTZ NULL,
-    created_at                  TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP,
-    updated_at                  TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP
+    email                                   TEXT        NOT NULL    UNIQUE,
+    password_hash                           TEXT        NOT NULL,
+    verified                                BOOLEAN     NOT NULL    DEFAULT FALSE,
+    private_key_symmetric_key_salt          BYTEA       NOT NULL,
+    private_key_encryption_nonce            BYTEA       NOT NULL,
+    private_key_ciphertext                  BYTEA       NOT NULL,
+    public_key                              BYTEA       NOT NULL,
+    last_login_at                           TIMESTAMPTZ NULL,
+    created_at                              TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP,
+    updated_at                              TIMESTAMPTZ NOT NULL    DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TRIGGER update_account_moddatetime
 BEFORE UPDATE ON "account"
