@@ -46,6 +46,7 @@ pub fn verify_password(hash: &Opaque<String>, password: &Password) -> Result<(),
 }
 
 // REMIND ME: think about exposition
+// REMIND ME: think about "material" suffix
 pub struct EncryptedKeyMaterial {
     pub symmetric_key_salt: Opaque<[u8; 16]>,
     pub encryption_nonce: Opaque<[u8; 12]>,
