@@ -45,7 +45,7 @@ pub fn verify_password(hash: &Opaque<String>, password: &Password) -> Result<(),
     }
 }
 
-// REMIND ME: think about exposition
+// REMIND ME: think about exposition and placement
 pub struct EncryptedPrivateKey {
     pub symmetric_key_salt: Opaque<[u8; 16]>,
     pub encryption_nonce: Opaque<[u8; 12]>,
@@ -66,12 +66,12 @@ impl EncryptedPrivateKey {
     }
 }
 
-pub struct KeyMaterial {
+pub struct PrivateKeyMaterial {
     private_key: SigningKey,
     pub encrypted: EncryptedPrivateKey,
 }
 
-impl KeyMaterial {
+impl PrivateKeyMaterial {
     pub fn generate(password: &Password) -> Result<Self, anyhow::Error> {
         let ed25519_secret_key: [u8; 32] = rand::random();
         let symmetric_key_salt: [u8; 16] = rand::random();

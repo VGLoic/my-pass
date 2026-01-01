@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{EncryptedPrivateKey, KeyMaterial, hash_password, verify_password},
+    crypto::{EncryptedPrivateKey, PrivateKeyMaterial, hash_password, verify_password},
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
     secrets,
 };
@@ -190,7 +190,9 @@ impl SignUpRequestHttpBody {
             decoded_encrypted_private_key.into(),
         );
 
-        if KeyMaterial::verify(&password, &encrypted_private_key, &decoded_public_key).is_err() {
+        if PrivateKeyMaterial::verify(&password, &encrypted_private_key, &decoded_public_key)
+            .is_err()
+        {
             return Err(SignupRequestError::InvalidKeyPair);
         }
 
@@ -224,22 +226,32 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
         let email: Email = Faker.fake_with_rng(rng);
         let password: Password = Faker.fake_with_rng(rng);
 
-        let key_material = KeyMaterial::generate(&password).unwrap();
+        let private_key_material = PrivateKeyMaterial::generate(&password).unwrap();
 
-        let public_key = BASE64_STANDARD.encode(key_material.public_key().as_bytes());
+        let public_key = BASE64_STANDARD.encode(private_key_material.public_key().as_bytes());
 
         SignUpRequestHttpBody {
             email: email.to_string(),
             password: password.unsafe_inner().to_owned().into(),
             encrypted_private_key: EncryptedPrivateKeyHttpBody {
                 symmetric_key_salt: BASE64_STANDARD
-                    .encode(key_material.encrypted.symmetric_key_salt.unsafe_inner())
+                    .encode(
+                        private_key_material
+                            .encrypted
+                            .symmetric_key_salt
+                            .unsafe_inner(),
+                    )
                     .into(),
                 ciphertext: BASE64_STANDARD
-                    .encode(key_material.encrypted.ciphertext.unsafe_inner())
+                    .encode(private_key_material.encrypted.ciphertext.unsafe_inner())
                     .into(),
                 encryption_nonce: BASE64_STANDARD
-                    .encode(key_material.encrypted.encryption_nonce.unsafe_inner())
+                    .encode(
+                        private_key_material
+                            .encrypted
+                            .encryption_nonce
+                            .unsafe_inner(),
+                    )
                     .into(),
             },
             public_key: public_key.into(),
