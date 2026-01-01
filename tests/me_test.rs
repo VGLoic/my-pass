@@ -98,28 +98,28 @@ async fn test_me() {
     assert_eq!(me_response_body.email, signup_body.email);
     assert_eq!(
         me_response_body
-            .encrypted_key_material
+            .encrypted_private_key
             .ciphertext
             .unsafe_inner(),
-        signup_body.encrypted_key_material.ciphertext.unsafe_inner()
+        signup_body.encrypted_private_key.ciphertext.unsafe_inner()
     );
     assert_eq!(
         me_response_body
-            .encrypted_key_material
+            .encrypted_private_key
             .symmetric_key_salt
             .unsafe_inner(),
         signup_body
-            .encrypted_key_material
+            .encrypted_private_key
             .symmetric_key_salt
             .unsafe_inner()
     );
     assert_eq!(
         me_response_body
-            .encrypted_key_material
+            .encrypted_private_key
             .encryption_nonce
             .unsafe_inner(),
         signup_body
-            .encrypted_key_material
+            .encrypted_private_key
             .encryption_nonce
             .unsafe_inner()
     );

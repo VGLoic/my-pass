@@ -46,14 +46,13 @@ pub fn verify_password(hash: &Opaque<String>, password: &Password) -> Result<(),
 }
 
 // REMIND ME: think about exposition
-// REMIND ME: think about "material" suffix
-pub struct EncryptedKeyMaterial {
+pub struct EncryptedPrivateKey {
     pub symmetric_key_salt: Opaque<[u8; 16]>,
     pub encryption_nonce: Opaque<[u8; 12]>,
     pub ciphertext: Opaque<Vec<u8>>,
 }
 
-impl EncryptedKeyMaterial {
+impl EncryptedPrivateKey {
     pub fn new(
         symmetric_key_salt: Opaque<[u8; 16]>,
         encryption_nonce: Opaque<[u8; 12]>,
@@ -69,7 +68,7 @@ impl EncryptedKeyMaterial {
 
 pub struct KeyMaterial {
     private_key: SigningKey,
-    pub encrypted: EncryptedKeyMaterial,
+    pub encrypted: EncryptedPrivateKey,
 }
 
 impl KeyMaterial {
@@ -97,7 +96,7 @@ impl KeyMaterial {
 
         Ok(Self {
             private_key: SigningKey::from_bytes(&ed25519_secret_key),
-            encrypted: EncryptedKeyMaterial {
+            encrypted: EncryptedPrivateKey {
                 symmetric_key_salt: symmetric_key_salt.into(),
                 encryption_nonce: encryption_nonce.into(),
                 ciphertext: ciphertext.into(),
@@ -107,14 +106,14 @@ impl KeyMaterial {
 
     pub fn verify(
         password: &Password,
-        encrypted_key_material: &EncryptedKeyMaterial,
+        encrypted_private_key: &EncryptedPrivateKey,
         expected_public_key: &[u8; 32],
     ) -> Result<(), anyhow::Error> {
         let mut encryption_key_material = [0u8; 32];
         argon2_instance()
             .hash_password_into(
                 password.unsafe_inner().as_bytes(),
-                encrypted_key_material.symmetric_key_salt.unsafe_inner(),
+                encrypted_private_key.symmetric_key_salt.unsafe_inner(),
                 &mut encryption_key_material,
             )
             .map_err(|e| anyhow!("{e}").context("Failed to generate encryption key material"))?;
@@ -123,12 +122,12 @@ impl KeyMaterial {
         let cipher = Aes256Gcm::new(aes_gcm_key);
 
         let encryption_nonce =
-            Nonce::<Aes256Gcm>::from_slice(encrypted_key_material.encryption_nonce.unsafe_inner());
+            Nonce::<Aes256Gcm>::from_slice(encrypted_private_key.encryption_nonce.unsafe_inner());
 
         let decrypted_private_key = cipher
             .decrypt(
                 encryption_nonce,
-                encrypted_key_material.ciphertext.unsafe_inner().as_slice(),
+                encrypted_private_key.ciphertext.unsafe_inner().as_slice(),
             )
             .map_err(|e| anyhow!("{e}").context("Failed to decrypt private key"))?;
 

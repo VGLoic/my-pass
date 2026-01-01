@@ -151,9 +151,9 @@ impl AccountsRepository for PsqlAccountsRepository {
         )
         .bind(&signup_request.email)
         .bind(&signup_request.password_hash)
-        .bind(&signup_request.encrypted_key_material.symmetric_key_salt)
-        .bind(&signup_request.encrypted_key_material.encryption_nonce)
-        .bind(&signup_request.encrypted_key_material.ciphertext)
+        .bind(&signup_request.encrypted_private_key.symmetric_key_salt)
+        .bind(&signup_request.encrypted_private_key.encryption_nonce)
+        .bind(&signup_request.encrypted_private_key.ciphertext)
         .bind(&signup_request.public_key)
         .fetch_one(&mut *transaction)
         .await
