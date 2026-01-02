@@ -1,5 +1,5 @@
 use crate::{
-    crypto::EncryptedKeyPair,
+    crypto::keypair::EncryptedKeyPair,
     newtypes::{Email, Opaque},
 };
 use base64::{Engine, prelude::BASE64_URL_SAFE};
