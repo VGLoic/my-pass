@@ -41,8 +41,8 @@ In each of the following sections, the implementation details for each user stor
 - The client generates a random salt and uses Argon2id to derive a Ed25519 key pair from the password and salt,
 - The client generates a random salt (`symmetricKeySalt`) for symmetric key derivation,
 - The client uses Argon2id to derive 32 bytes AES-256-GCM symmetric key from the password and the salt,
-- The client generates a 12 bytes random nonce (`encryptedPrivateKeyNonce`) for AES-256-GCM,
-- The client symmetrically encrypts the private key using AES-256-GCM with the derived symmetric key, result is `encryptedPrivateKey`,
+- The client generates a 12 bytes random nonce (`encryptionNonce`) for AES-256-GCM,
+- The client symmetrically encrypts the private key using AES-256-GCM with the derived symmetric key, result is `ciphertext`,
 - The client sends the email, password, the derivation key salt, the encrypted private key nonce, the encrypted private key and the public key to the server using the endpoint described below.
 
 **Server Side:**
@@ -53,20 +53,20 @@ Endpoint: `POST /api/accounts/signup` with request body:
   "email": "<user_email>",
   "password": "<user_password>",
   "symmetricKeySalt": "<salt_for_symmetric_key_derivation>",
-  "encryptedPrivateKeyNonce": "<user_encrypted_private_key_nonce>",
-  "encryptedPrivateKey": "<user_encrypted_private_key>",
+  "encryptionNonce": "<user_encryption_nonce>",
+  "ciphertext": "<user_encrypted_private_key>",
   "publicKey": "<user_public_key>",
 }
 ```
 
 Handler logic:
-1. Validate the email, password, symmetric key salt, encrypted private key nonce, encrypted private key, and public key format,
+1. Validate the email, password, symmetric key salt, encryption nonce, ciphertext, and public key format,
 2. Regenerates the symmetric key from the password and the symmetric key salt using Argon2id,
-3. Decrypts the private key using the symmetric key and the encrypted private key nonce to verify the provided public key matches the derived public key,
+3. Decrypts the private key using the symmetric key and the encryption nonce to verify the provided public key matches the derived public key,
 4. Hashes the password using Argon2id,
 5. Generates a random verification token, it is valid for 15 minutes,
 6. Stores in database:
-    - the account with email, hashed password, symmetric key salt, encrypted private key nonce, encrypted private key, public key,
+    - the account with email, hashed password, symmetric key salt, encryption nonce, ciphertext, public key,
     - the verification ticket containing the token, associated with the account,
 7. Sends a verification email to the user with a link containing the verification token.
 
