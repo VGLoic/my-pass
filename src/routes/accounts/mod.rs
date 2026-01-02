@@ -1,7 +1,7 @@
 use crate::{
     crypto::{
         keypair::{EncryptedKeyPair, KeyPair},
-        password,
+        password::PasswordOps,
     },
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
     secrets,
@@ -201,8 +201,9 @@ impl SignUpRequestHttpBody {
 
         let verification_ticket_lifetime = chrono::Duration::minutes(15);
 
-        let password_hash =
-            password::hash_password(&password).map_err(|e| e.context("Failed to hash password"))?;
+        let password_hash = password
+            .hash()
+            .map_err(|e| e.context("Failed to hash password"))?;
 
         Ok(SignupRequest::new(
             email,
@@ -450,7 +451,7 @@ impl NewVerificationTicketRequestHttpBody {
             }
         })?;
 
-        if password::verify_password(&account.password_hash, &password).is_err() {
+        if password.verify(&account.password_hash).is_err() {
             return Err(NewVerificationTicketRequestError::InvalidPassword);
         }
 
@@ -570,7 +571,7 @@ impl LoginRequestHttpBody {
             return Err(LoginRequestError::AccountNotVerified);
         }
 
-        if password::verify_password(&account.password_hash, &password).is_err() {
+        if password.verify(&account.password_hash).is_err() {
             return Err(LoginRequestError::InvalidPassword);
         }
 
@@ -724,7 +725,7 @@ mod tests {
                 .as_slice()
         );
         let password = Password::new(http_signup_request.password.unsafe_inner()).unwrap();
-        assert!(password::verify_password(&signup_request.password_hash, &password).is_ok());
+        assert!(password.verify(&signup_request.password_hash).is_ok());
 
         assert!(
             !signup_request
@@ -1006,7 +1007,7 @@ mod tests {
     fn test_valid_login_request() {
         let password = Faker.fake::<Password>();
         let mut account = fake_account();
-        account.password_hash = password::hash_password(&password).unwrap().into();
+        account.password_hash = password.hash().unwrap().into();
         account.verified = true;
         let http_request = LoginRequestHttpBody {
             email: account.email.to_string(),
@@ -1024,7 +1025,7 @@ mod tests {
     fn test_unverified_account_login_request() {
         let password = Faker.fake::<Password>();
         let mut account = fake_account();
-        account.password_hash = password::hash_password(&password).unwrap().into();
+        account.password_hash = password.hash().unwrap().into();
         account.verified = false;
         let http_request = LoginRequestHttpBody {
             email: account.email.to_string(),
@@ -1043,7 +1044,7 @@ mod tests {
     fn test_invalid_password_format_login_request() {
         let password = Faker.fake::<Password>();
         let mut account = fake_account();
-        account.password_hash = password::hash_password(&password).unwrap().into();
+        account.password_hash = password.hash().unwrap().into();
         account.verified = true;
         let http_request = LoginRequestHttpBody {
             email: account.email.to_string(),
@@ -1087,7 +1088,7 @@ mod tests {
         Account {
             id: uuid::Uuid::new_v4(),
             email: Faker.fake(),
-            password_hash: password::hash_password(&password).unwrap().into(),
+            password_hash: password.hash().unwrap().into(),
             verified: false,
             private_key_symmetric_key_salt: Opaque::new(Faker.fake::<[u8; 16]>()),
             private_key_encryption_nonce: Opaque::new(Faker.fake::<[u8; 12]>()),
@@ -1118,7 +1119,7 @@ mod tests {
     fn test_valid_new_verification_ticket_request_without_last_ticket() {
         let mut account = fake_account();
         let password = Faker.fake::<Password>();
-        account.password_hash = password::hash_password(&password).unwrap().into();
+        account.password_hash = password.hash().unwrap().into();
         let http_request = NewVerificationTicketRequestHttpBody {
             email: account.email.to_string(),
             password: password.unsafe_inner().to_owned().into(),
@@ -1142,7 +1143,7 @@ mod tests {
     fn test_valid_new_verification_ticket_request_with_last_ticket() {
         let mut account = fake_account();
         let password = Faker.fake::<Password>();
-        account.password_hash = password::hash_password(&password).unwrap().into();
+        account.password_hash = password.hash().unwrap().into();
         let mut last_ticket = fake_verification_ticket(account.id);
         last_ticket.created_at = chrono::Utc::now() - chrono::Duration::minutes(6);
         last_ticket.expires_at = chrono::Utc::now() + chrono::Duration::minutes(9);
@@ -1169,7 +1170,7 @@ mod tests {
     fn test_invalid_new_verification_ticket_request_invalid_password_format() {
         let mut account = fake_account();
         let password = Faker.fake::<Password>();
-        account.password_hash = password::hash_password(&password).unwrap().into();
+        account.password_hash = password.hash().unwrap().into();
         let http_request = NewVerificationTicketRequestHttpBody {
             email: account.email.to_string(),
             password: Opaque::new("".to_string()), // Empty password
@@ -1204,7 +1205,7 @@ mod tests {
     fn test_invalid_new_verification_ticket_request_account_already_verified() {
         let mut account = fake_account();
         let password = Faker.fake::<Password>();
-        account.password_hash = password::hash_password(&password).unwrap().into();
+        account.password_hash = password.hash().unwrap().into();
         account.verified = true;
         let http_request = NewVerificationTicketRequestHttpBody {
             email: account.email.to_string(),
@@ -1223,7 +1224,7 @@ mod tests {
     fn test_invalid_new_verification_ticket_request_not_enough_time_passed() {
         let mut account = fake_account();
         let password = Faker.fake::<Password>();
-        account.password_hash = password::hash_password(&password).unwrap().into();
+        account.password_hash = password.hash().unwrap().into();
         let mut last_ticket = fake_verification_ticket(account.id);
         last_ticket.created_at = chrono::Utc::now() - chrono::Duration::minutes(4);
         last_ticket.expires_at = chrono::Utc::now() + chrono::Duration::minutes(11);
