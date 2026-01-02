@@ -111,7 +111,7 @@ pub struct EncryptedKeyPairHttpBody {
     pub symmetric_key_salt: Opaque<String>,
     /// Nonce used for the encryption of the private key, must be 12 bytes encoded in base64
     pub encryption_nonce: Opaque<String>,
-    /// Encrypted Ed25519 private key of the user using AES-256-GCM with a key derived from the password and symmetric_key_salt, the used nonce is `encryptedPrivateKeyNonce`.
+    /// Encrypted Ed25519 private key of the user using AES-256-GCM with a key derived from the password and symmetric_key_salt, the used nonce is `encryption_nonce`.
     /// It must be base64 encoded
     pub ciphertext: Opaque<String>,
     /// Public Ed25519 key of the user, must be base64 encoded
@@ -617,6 +617,7 @@ pub struct MeResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EncryptedKeyPairResponse {
     pub symmetric_key_salt: Opaque<String>,
     pub encryption_nonce: Opaque<String>,

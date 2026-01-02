@@ -118,7 +118,9 @@ impl KeyPair {
                 &symmetric_key_salt,
                 &mut symmetric_key_material,
             )
-            .map_err(|e| anyhow!("{e}").context("failed to derive AES key salt"))?;
+            .map_err(|e| {
+                anyhow!("{e}").context("failed to derive symmetric key from password and salt")
+            })?;
 
         let aes_gcm_key = Key::<Aes256Gcm>::from_slice(&symmetric_key_material);
         let cipher = Aes256Gcm::new(aes_gcm_key);
