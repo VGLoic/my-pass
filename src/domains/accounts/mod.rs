@@ -1,5 +1,5 @@
 use crate::{
-    crypto::EncryptedPrivateKey,
+    crypto::EncryptedKeyPair,
     newtypes::{Email, Opaque},
 };
 use base64::{Engine, prelude::BASE64_URL_SAFE};
@@ -48,8 +48,7 @@ pub struct VerificationTicket {
 pub struct SignupRequest {
     pub email: Email,
     pub password_hash: Opaque<String>,
-    pub encrypted_private_key: EncryptedPrivateKey,
-    pub public_key: Opaque<[u8; 32]>,
+    pub encrypted_key_pair: EncryptedKeyPair,
     pub verification_ticket_token: Opaque<String>,
     pub verification_ticket_expires_at: chrono::DateTime<chrono::Utc>,
 }
@@ -79,8 +78,7 @@ impl SignupRequest {
     pub fn new(
         email: Email,
         password_hash: Opaque<String>,
-        encrypted_private_key: EncryptedPrivateKey,
-        public_key: Opaque<[u8; 32]>,
+        encrypted_key_pair: EncryptedKeyPair,
         verification_ticket_token: Opaque<[u8; 32]>,
         verification_ticket_lifetime: chrono::Duration,
     ) -> Self {
@@ -91,8 +89,7 @@ impl SignupRequest {
         SignupRequest {
             email,
             password_hash,
-            encrypted_private_key,
-            public_key,
+            encrypted_key_pair,
             verification_ticket_token: verification_ticket_token.into(),
             verification_ticket_expires_at,
         }

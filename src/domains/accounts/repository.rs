@@ -151,10 +151,10 @@ impl AccountsRepository for PsqlAccountsRepository {
         )
         .bind(&signup_request.email)
         .bind(&signup_request.password_hash)
-        .bind(&signup_request.encrypted_private_key.symmetric_key_salt)
-        .bind(&signup_request.encrypted_private_key.encryption_nonce)
-        .bind(&signup_request.encrypted_private_key.ciphertext)
-        .bind(&signup_request.public_key)
+        .bind(&signup_request.encrypted_key_pair.symmetric_key_salt)
+        .bind(&signup_request.encrypted_key_pair.encryption_nonce)
+        .bind(&signup_request.encrypted_key_pair.ciphertext)
+        .bind(&signup_request.encrypted_key_pair.public_key)
         .fetch_one(&mut *transaction)
         .await
         .map_err(|e| {
