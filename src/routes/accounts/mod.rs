@@ -234,16 +234,16 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
             password: password.unsafe_inner().to_owned().into(),
             encrypted_key_pair: EncryptedKeyPairHttpBody {
                 symmetric_key_salt: BASE64_STANDARD
-                    .encode(encrypted_key_pair.symmetric_key_salt.unsafe_inner())
+                    .encode(encrypted_key_pair.symmetric_key_salt().unsafe_inner())
                     .into(),
                 ciphertext: BASE64_STANDARD
-                    .encode(encrypted_key_pair.ciphertext.unsafe_inner())
+                    .encode(encrypted_key_pair.ciphertext().unsafe_inner())
                     .into(),
                 encryption_nonce: BASE64_STANDARD
-                    .encode(encrypted_key_pair.encryption_nonce.unsafe_inner())
+                    .encode(encrypted_key_pair.encryption_nonce().unsafe_inner())
                     .into(),
                 public_key: BASE64_STANDARD
-                    .encode(encrypted_key_pair.public_key.unsafe_inner())
+                    .encode(encrypted_key_pair.public_key().unsafe_inner())
                     .into(),
             },
         }
@@ -542,7 +542,7 @@ async fn login(
     Ok((
         StatusCode::OK,
         Json(LoginResponse {
-            access_token: login_request.access_token,
+            access_token: login_request.access_token().clone(),
         }),
     ))
 }
@@ -668,11 +668,14 @@ mod tests {
         assert!(result.is_ok());
         let signup_request = result.unwrap();
         assert_eq!(
-            signup_request.email.as_str(),
+            signup_request.email().as_str(),
             http_signup_request.email.as_str()
         );
         assert_eq!(
-            signup_request.encrypted_key_pair.public_key.unsafe_inner(),
+            signup_request
+                .encrypted_key_pair()
+                .public_key()
+                .unsafe_inner(),
             BASE64_STANDARD
                 .decode(
                     http_signup_request
@@ -685,8 +688,8 @@ mod tests {
         );
         assert_eq!(
             signup_request
-                .encrypted_key_pair
-                .symmetric_key_salt
+                .encrypted_key_pair()
+                .symmetric_key_salt()
                 .unsafe_inner(),
             BASE64_STANDARD
                 .decode(
@@ -700,8 +703,8 @@ mod tests {
         );
         assert_eq!(
             signup_request
-                .encrypted_key_pair
-                .encryption_nonce
+                .encrypted_key_pair()
+                .encryption_nonce()
                 .unsafe_inner(),
             BASE64_STANDARD
                 .decode(
@@ -714,7 +717,10 @@ mod tests {
                 .as_slice()
         );
         assert_eq!(
-            signup_request.encrypted_key_pair.ciphertext.unsafe_inner(),
+            signup_request
+                .encrypted_key_pair()
+                .ciphertext()
+                .unsafe_inner(),
             BASE64_STANDARD
                 .decode(
                     http_signup_request
@@ -726,15 +732,15 @@ mod tests {
                 .as_slice()
         );
         let password = Password::new(http_signup_request.password.unsafe_inner()).unwrap();
-        assert!(password.verify(&signup_request.password_hash).is_ok());
+        assert!(password.verify(signup_request.password_hash()).is_ok());
 
         assert!(
             !signup_request
-                .verification_ticket_token
+                .verification_ticket_token()
                 .unsafe_inner()
                 .is_empty()
         );
-        assert!(signup_request.verification_ticket_expires_at > chrono::Utc::now());
+        assert!(signup_request.verification_ticket_expires_at() > &chrono::Utc::now());
     }
 
     #[test]
@@ -902,10 +908,10 @@ mod tests {
         let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
         assert!(result.is_ok());
         let use_verification_ticket_request = result.unwrap();
-        assert_eq!(use_verification_ticket_request.account_id, account.id);
+        assert_eq!(use_verification_ticket_request.account_id(), &account.id);
         assert_eq!(
-            use_verification_ticket_request.valid_ticket_id,
-            verification_ticket.id
+            use_verification_ticket_request.valid_ticket_id(),
+            &verification_ticket.id
         );
     }
 
@@ -1018,8 +1024,8 @@ mod tests {
         let result = http_request.try_into_domain(&account, &jwt_secret);
         assert!(result.is_ok());
         let login_request = result.unwrap();
-        assert_eq!(login_request.account_id, account.id);
-        assert!(jwt::decode_and_validate_jwt(&login_request.access_token, &jwt_secret).is_ok());
+        assert_eq!(login_request.account_id(), &account.id);
+        assert!(jwt::decode_and_validate_jwt(login_request.access_token(), &jwt_secret).is_ok());
     }
 
     #[test]
@@ -1129,15 +1135,15 @@ mod tests {
         let result = http_request.try_into_domain(&account, &last_ticket);
         assert!(result.is_ok());
         let new_ticket_request = result.unwrap();
-        assert_eq!(new_ticket_request.account_id, account.id);
-        assert_eq!(new_ticket_request.ticket_id_to_cancel, None);
+        assert_eq!(new_ticket_request.account_id(), &account.id);
+        assert_eq!(new_ticket_request.ticket_id_to_cancel(), &None);
         assert!(
             !new_ticket_request
-                .verification_ticket_token
+                .verification_ticket_token()
                 .unsafe_inner()
                 .is_empty()
         );
-        assert!(new_ticket_request.verification_ticket_expires_at > chrono::Utc::now());
+        assert!(new_ticket_request.verification_ticket_expires_at() > &chrono::Utc::now());
     }
 
     #[test]
@@ -1156,15 +1162,18 @@ mod tests {
         let result = http_request.try_into_domain(&account, &Some(last_ticket.clone()));
         assert!(result.is_ok());
         let new_ticket_request = result.unwrap();
-        assert_eq!(new_ticket_request.account_id, account.id);
-        assert_eq!(new_ticket_request.ticket_id_to_cancel, Some(last_ticket.id));
+        assert_eq!(new_ticket_request.account_id(), &account.id);
+        assert_eq!(
+            new_ticket_request.ticket_id_to_cancel(),
+            &Some(last_ticket.id)
+        );
         assert!(
             !new_ticket_request
-                .verification_ticket_token
+                .verification_ticket_token()
                 .unsafe_inner()
                 .is_empty()
         );
-        assert!(new_ticket_request.verification_ticket_expires_at > chrono::Utc::now());
+        assert!(new_ticket_request.verification_ticket_expires_at() > &chrono::Utc::now());
     }
 
     #[test]
