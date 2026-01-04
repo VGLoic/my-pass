@@ -46,11 +46,11 @@ pub struct VerificationTicket {
 // #######################################
 
 pub struct SignupRequest {
-    pub email: Email,
-    pub password_hash: Opaque<String>,
-    pub encrypted_key_pair: EncryptedKeyPair,
-    pub verification_ticket_token: Opaque<String>,
-    pub verification_ticket_expires_at: chrono::DateTime<chrono::Utc>,
+    email: Email,
+    password_hash: Opaque<String>,
+    encrypted_key_pair: EncryptedKeyPair,
+    verification_ticket_token: Opaque<String>,
+    verification_ticket_expires_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Error)]
@@ -93,6 +93,22 @@ impl SignupRequest {
             verification_ticket_token: verification_ticket_token.into(),
             verification_ticket_expires_at,
         }
+    }
+
+    pub fn email(&self) -> &Email {
+        &self.email
+    }
+    pub fn password_hash(&self) -> &Opaque<String> {
+        &self.password_hash
+    }
+    pub fn encrypted_key_pair(&self) -> &EncryptedKeyPair {
+        &self.encrypted_key_pair
+    }
+    pub fn verification_ticket_token(&self) -> &Opaque<String> {
+        &self.verification_ticket_token
+    }
+    pub fn verification_ticket_expires_at(&self) -> &chrono::DateTime<chrono::Utc> {
+        &self.verification_ticket_expires_at
     }
 }
 

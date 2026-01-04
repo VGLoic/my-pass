@@ -668,12 +668,12 @@ mod tests {
         assert!(result.is_ok());
         let signup_request = result.unwrap();
         assert_eq!(
-            signup_request.email.as_str(),
+            signup_request.email().as_str(),
             http_signup_request.email.as_str()
         );
         assert_eq!(
             signup_request
-                .encrypted_key_pair
+                .encrypted_key_pair()
                 .public_key()
                 .unsafe_inner(),
             BASE64_STANDARD
@@ -688,7 +688,7 @@ mod tests {
         );
         assert_eq!(
             signup_request
-                .encrypted_key_pair
+                .encrypted_key_pair()
                 .symmetric_key_salt()
                 .unsafe_inner(),
             BASE64_STANDARD
@@ -703,7 +703,7 @@ mod tests {
         );
         assert_eq!(
             signup_request
-                .encrypted_key_pair
+                .encrypted_key_pair()
                 .encryption_nonce()
                 .unsafe_inner(),
             BASE64_STANDARD
@@ -718,7 +718,7 @@ mod tests {
         );
         assert_eq!(
             signup_request
-                .encrypted_key_pair
+                .encrypted_key_pair()
                 .ciphertext()
                 .unsafe_inner(),
             BASE64_STANDARD
@@ -732,15 +732,15 @@ mod tests {
                 .as_slice()
         );
         let password = Password::new(http_signup_request.password.unsafe_inner()).unwrap();
-        assert!(password.verify(&signup_request.password_hash).is_ok());
+        assert!(password.verify(signup_request.password_hash()).is_ok());
 
         assert!(
             !signup_request
-                .verification_ticket_token
+                .verification_ticket_token()
                 .unsafe_inner()
                 .is_empty()
         );
-        assert!(signup_request.verification_ticket_expires_at > chrono::Utc::now());
+        assert!(signup_request.verification_ticket_expires_at() > &chrono::Utc::now());
     }
 
     #[test]
