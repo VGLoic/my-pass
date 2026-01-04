@@ -234,16 +234,16 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
             password: password.unsafe_inner().to_owned().into(),
             encrypted_key_pair: EncryptedKeyPairHttpBody {
                 symmetric_key_salt: BASE64_STANDARD
-                    .encode(encrypted_key_pair.symmetric_key_salt.unsafe_inner())
+                    .encode(encrypted_key_pair.symmetric_key_salt().unsafe_inner())
                     .into(),
                 ciphertext: BASE64_STANDARD
-                    .encode(encrypted_key_pair.ciphertext.unsafe_inner())
+                    .encode(encrypted_key_pair.ciphertext().unsafe_inner())
                     .into(),
                 encryption_nonce: BASE64_STANDARD
-                    .encode(encrypted_key_pair.encryption_nonce.unsafe_inner())
+                    .encode(encrypted_key_pair.encryption_nonce().unsafe_inner())
                     .into(),
                 public_key: BASE64_STANDARD
-                    .encode(encrypted_key_pair.public_key.unsafe_inner())
+                    .encode(encrypted_key_pair.public_key().unsafe_inner())
                     .into(),
             },
         }
@@ -672,7 +672,10 @@ mod tests {
             http_signup_request.email.as_str()
         );
         assert_eq!(
-            signup_request.encrypted_key_pair.public_key.unsafe_inner(),
+            signup_request
+                .encrypted_key_pair
+                .public_key()
+                .unsafe_inner(),
             BASE64_STANDARD
                 .decode(
                     http_signup_request
@@ -686,7 +689,7 @@ mod tests {
         assert_eq!(
             signup_request
                 .encrypted_key_pair
-                .symmetric_key_salt
+                .symmetric_key_salt()
                 .unsafe_inner(),
             BASE64_STANDARD
                 .decode(
@@ -701,7 +704,7 @@ mod tests {
         assert_eq!(
             signup_request
                 .encrypted_key_pair
-                .encryption_nonce
+                .encryption_nonce()
                 .unsafe_inner(),
             BASE64_STANDARD
                 .decode(
@@ -714,7 +717,10 @@ mod tests {
                 .as_slice()
         );
         assert_eq!(
-            signup_request.encrypted_key_pair.ciphertext.unsafe_inner(),
+            signup_request
+                .encrypted_key_pair
+                .ciphertext()
+                .unsafe_inner(),
             BASE64_STANDARD
                 .decode(
                     http_signup_request

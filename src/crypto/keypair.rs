@@ -12,13 +12,13 @@ use crate::newtypes::{Opaque, Password};
 /// Represents an encrypted key pair, including the necessary metadata for decryption.
 pub struct EncryptedKeyPair {
     /// Salt used to derive the symmetric encryption key
-    pub symmetric_key_salt: Opaque<[u8; 16]>,
+    symmetric_key_salt: Opaque<[u8; 16]>,
     /// Nonce used for the encryption
-    pub encryption_nonce: Opaque<[u8; 12]>,
+    encryption_nonce: Opaque<[u8; 12]>,
     /// Encrypted private key ciphertext
-    pub ciphertext: Opaque<Vec<u8>>,
+    ciphertext: Opaque<Vec<u8>>,
     /// Public key corresponding to the encrypted private key
-    pub public_key: Opaque<[u8; 32]>,
+    public_key: Opaque<[u8; 32]>,
 }
 
 impl EncryptedKeyPair {
@@ -82,6 +82,19 @@ impl EncryptedKeyPair {
             ciphertext,
             public_key,
         })
+    }
+
+    pub fn symmetric_key_salt(&self) -> &Opaque<[u8; 16]> {
+        &self.symmetric_key_salt
+    }
+    pub fn encryption_nonce(&self) -> &Opaque<[u8; 12]> {
+        &self.encryption_nonce
+    }
+    pub fn ciphertext(&self) -> &Opaque<Vec<u8>> {
+        &self.ciphertext
+    }
+    pub fn public_key(&self) -> &Opaque<[u8; 32]> {
+        &self.public_key
     }
 }
 
