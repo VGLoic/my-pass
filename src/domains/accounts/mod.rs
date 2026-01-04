@@ -125,8 +125,8 @@ pub enum CreateAccountError {
 // #######################################################
 
 pub struct UseVerificationTicketRequest {
-    pub account_id: uuid::Uuid,
-    pub valid_ticket_id: uuid::Uuid,
+    account_id: uuid::Uuid,
+    valid_ticket_id: uuid::Uuid,
 }
 
 #[derive(Debug, Error)]
@@ -152,6 +152,13 @@ impl UseVerificationTicketRequest {
             valid_ticket_id,
         }
     }
+
+    pub fn account_id(&self) -> &uuid::Uuid {
+        &self.account_id
+    }
+    pub fn valid_ticket_id(&self) -> &uuid::Uuid {
+        &self.valid_ticket_id
+    }
 }
 
 #[derive(Debug, Error)]
@@ -165,10 +172,10 @@ pub enum UseVerificationTicketError {
 // #######################################################
 
 pub struct NewVerificationTicketRequest {
-    pub account_id: uuid::Uuid,
-    pub ticket_id_to_cancel: Option<uuid::Uuid>,
-    pub verification_ticket_token: Opaque<String>,
-    pub verification_ticket_expires_at: chrono::DateTime<chrono::Utc>,
+    account_id: uuid::Uuid,
+    ticket_id_to_cancel: Option<uuid::Uuid>,
+    verification_ticket_token: Opaque<String>,
+    verification_ticket_expires_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Error)]
@@ -203,6 +210,19 @@ impl NewVerificationTicketRequest {
             verification_ticket_expires_at,
         }
     }
+
+    pub fn account_id(&self) -> &uuid::Uuid {
+        &self.account_id
+    }
+    pub fn ticket_id_to_cancel(&self) -> &Option<uuid::Uuid> {
+        &self.ticket_id_to_cancel
+    }
+    pub fn verification_ticket_token(&self) -> &Opaque<String> {
+        &self.verification_ticket_token
+    }
+    pub fn verification_ticket_expires_at(&self) -> &chrono::DateTime<chrono::Utc> {
+        &self.verification_ticket_expires_at
+    }
 }
 
 #[derive(Debug, Error)]
@@ -216,8 +236,8 @@ pub enum NewVerificationTicketError {
 // #############################################
 
 pub struct LoginRequest {
-    pub account_id: uuid::Uuid,
-    pub access_token: Opaque<String>,
+    account_id: uuid::Uuid,
+    access_token: Opaque<String>,
 }
 
 impl LoginRequest {
@@ -226,6 +246,13 @@ impl LoginRequest {
             account_id,
             access_token,
         }
+    }
+
+    pub fn account_id(&self) -> &uuid::Uuid {
+        &self.account_id
+    }
+    pub fn access_token(&self) -> &Opaque<String> {
+        &self.access_token
     }
 }
 

@@ -542,7 +542,7 @@ async fn login(
     Ok((
         StatusCode::OK,
         Json(LoginResponse {
-            access_token: login_request.access_token,
+            access_token: login_request.access_token().clone(),
         }),
     ))
 }
@@ -908,10 +908,10 @@ mod tests {
         let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
         assert!(result.is_ok());
         let use_verification_ticket_request = result.unwrap();
-        assert_eq!(use_verification_ticket_request.account_id, account.id);
+        assert_eq!(use_verification_ticket_request.account_id(), &account.id);
         assert_eq!(
-            use_verification_ticket_request.valid_ticket_id,
-            verification_ticket.id
+            use_verification_ticket_request.valid_ticket_id(),
+            &verification_ticket.id
         );
     }
 
@@ -1024,8 +1024,8 @@ mod tests {
         let result = http_request.try_into_domain(&account, &jwt_secret);
         assert!(result.is_ok());
         let login_request = result.unwrap();
-        assert_eq!(login_request.account_id, account.id);
-        assert!(jwt::decode_and_validate_jwt(&login_request.access_token, &jwt_secret).is_ok());
+        assert_eq!(login_request.account_id(), &account.id);
+        assert!(jwt::decode_and_validate_jwt(login_request.access_token(), &jwt_secret).is_ok());
     }
 
     #[test]
@@ -1135,15 +1135,15 @@ mod tests {
         let result = http_request.try_into_domain(&account, &last_ticket);
         assert!(result.is_ok());
         let new_ticket_request = result.unwrap();
-        assert_eq!(new_ticket_request.account_id, account.id);
-        assert_eq!(new_ticket_request.ticket_id_to_cancel, None);
+        assert_eq!(new_ticket_request.account_id(), &account.id);
+        assert_eq!(new_ticket_request.ticket_id_to_cancel(), &None);
         assert!(
             !new_ticket_request
-                .verification_ticket_token
+                .verification_ticket_token()
                 .unsafe_inner()
                 .is_empty()
         );
-        assert!(new_ticket_request.verification_ticket_expires_at > chrono::Utc::now());
+        assert!(new_ticket_request.verification_ticket_expires_at() > &chrono::Utc::now());
     }
 
     #[test]
@@ -1162,15 +1162,18 @@ mod tests {
         let result = http_request.try_into_domain(&account, &Some(last_ticket.clone()));
         assert!(result.is_ok());
         let new_ticket_request = result.unwrap();
-        assert_eq!(new_ticket_request.account_id, account.id);
-        assert_eq!(new_ticket_request.ticket_id_to_cancel, Some(last_ticket.id));
+        assert_eq!(new_ticket_request.account_id(), &account.id);
+        assert_eq!(
+            new_ticket_request.ticket_id_to_cancel(),
+            &Some(last_ticket.id)
+        );
         assert!(
             !new_ticket_request
-                .verification_ticket_token
+                .verification_ticket_token()
                 .unsafe_inner()
                 .is_empty()
         );
-        assert!(new_ticket_request.verification_ticket_expires_at > chrono::Utc::now());
+        assert!(new_ticket_request.verification_ticket_expires_at() > &chrono::Utc::now());
     }
 
     #[test]
