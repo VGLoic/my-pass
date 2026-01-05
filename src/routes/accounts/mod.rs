@@ -276,22 +276,29 @@ async fn use_verification_ticket(
 
     let use_verification_ticket_request =
         body.try_into_domain(account, ticket).map_err(|e| match e {
-            UseVerificationTicketRequestError::AlreadyVerified => {
-                ApiError::BadRequest("Account is already verified".to_string())
-            }
-            UseVerificationTicketRequestError::AlreadyUsed => {
-                ApiError::BadRequest("Verification ticket has already been used".to_string())
-            }
-            UseVerificationTicketRequestError::Cancelled => {
-                ApiError::BadRequest("Verification ticket has been cancelled".to_string())
-            }
-            UseVerificationTicketRequestError::Expired => {
-                ApiError::BadRequest("Verification ticket has expired".to_string())
-            }
-            UseVerificationTicketRequestError::InvalidToken => {
+            UseVerificationTicketRequestMappingError::InvalidTokenFormat(_msg) => {
                 ApiError::BadRequest("Invalid verification ticket token".to_string())
             }
-            UseVerificationTicketRequestError::Unknown(err) => ApiError::InternalServerError(err),
+            UseVerificationTicketRequestMappingError::InvalidRequest(e) => match e {
+                UseVerificationTicketRequestError::AlreadyVerified => {
+                    ApiError::BadRequest("Account is already verified".to_string())
+                }
+                UseVerificationTicketRequestError::AlreadyUsed => {
+                    ApiError::BadRequest("Verification ticket has already been used".to_string())
+                }
+                UseVerificationTicketRequestError::Cancelled => {
+                    ApiError::BadRequest("Verification ticket has been cancelled".to_string())
+                }
+                UseVerificationTicketRequestError::Expired => {
+                    ApiError::BadRequest("Verification ticket has expired".to_string())
+                }
+                UseVerificationTicketRequestError::InvalidToken => {
+                    ApiError::BadRequest("Invalid verification ticket token".to_string())
+                }
+                UseVerificationTicketRequestError::Unknown(err) => {
+                    ApiError::InternalServerError(err)
+                }
+            },
         })?;
 
     app_state
@@ -313,55 +320,28 @@ pub struct UseVerificationTicketRequestHttpBody {
     pub token: Opaque<String>,
 }
 
+#[derive(Debug)]
+enum UseVerificationTicketRequestMappingError {
+    InvalidTokenFormat(String),
+    InvalidRequest(UseVerificationTicketRequestError),
+}
+
 impl UseVerificationTicketRequestHttpBody {
-    pub fn try_into_domain(
+    fn try_into_domain(
         self,
         account: Account,
         verification_ticket: VerificationTicket,
-    ) -> Result<UseVerificationTicketRequest, UseVerificationTicketRequestError> {
-        if account.verified {
-            return Err(UseVerificationTicketRequestError::AlreadyVerified);
-        }
-
-        if verification_ticket.used_at.is_some() {
-            return Err(UseVerificationTicketRequestError::AlreadyUsed);
-        }
-
-        if verification_ticket.cancelled_at.is_some() {
-            return Err(UseVerificationTicketRequestError::Cancelled);
-        }
-
-        if verification_ticket.expires_at < chrono::Utc::now() {
-            return Err(UseVerificationTicketRequestError::Expired);
-        }
-
-        // Constant time comparison to prevent timing attacks
+    ) -> Result<UseVerificationTicketRequest, UseVerificationTicketRequestMappingError> {
         let decoded_input = BASE64_URL_SAFE
             .decode(self.token.unsafe_inner())
-            .map_err(|_| UseVerificationTicketRequestError::InvalidToken)?;
-        let decoded_stored = BASE64_URL_SAFE
-            .decode(verification_ticket.token.unsafe_inner())
-            .map_err(|_| UseVerificationTicketRequestError::InvalidToken)?;
+            .map_err(|_| {
+                UseVerificationTicketRequestMappingError::InvalidTokenFormat(
+                    "Invalid token format".to_string(),
+                )
+            })?;
 
-        let compared_input = if decoded_input.len() != decoded_stored.len() {
-            // If lengths differ, create a dummy vector of the same length as stored token
-            vec![0u8; decoded_stored.len()]
-        } else {
-            decoded_input
-        };
-        let equal_side_by_side = compared_input
-            .iter()
-            .zip(decoded_stored.iter())
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-            == 0;
-        if !equal_side_by_side {
-            return Err(UseVerificationTicketRequestError::InvalidToken);
-        }
-
-        Ok(UseVerificationTicketRequest::new(
-            account.id,
-            verification_ticket.id,
-        ))
+        UseVerificationTicketRequest::new(account, verification_ticket, decoded_input.into())
+            .map_err(UseVerificationTicketRequestMappingError::InvalidRequest)
     }
 }
 
@@ -910,88 +890,14 @@ mod tests {
             email: account.email.to_string(),
             token: verification_ticket.token.clone(),
         };
-        // Corrupt the token
-        let corrupted_token = {
-            let mut token_bytes = BASE64_URL_SAFE
-                .decode(http_request.token.unsafe_inner())
-                .unwrap();
-            token_bytes[0] ^= 0xFF; // Flip some bits
-            BASE64_URL_SAFE.encode(token_bytes)
-        };
-        http_request.token = Opaque::new(corrupted_token);
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        // Badly encoded token
+        let badly_encoded_token = "!!!invalid_base64!!!".to_string();
+        http_request.token = Opaque::new(badly_encoded_token);
+        let result = http_request.try_into_domain(account, verification_ticket);
         assert!(result.is_err());
         match result.err().unwrap() {
-            UseVerificationTicketRequestError::InvalidToken => {}
-            _ => panic!("Expected InvalidToken error"),
-        };
-    }
-
-    #[test]
-    fn test_account_already_verified_use_verification_ticket_request() {
-        let mut account = fake_account();
-        account.verified = true;
-        let verification_ticket = fake_verification_ticket(account.id);
-        let http_request = UseVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            token: verification_ticket.token.clone(),
-        };
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            UseVerificationTicketRequestError::AlreadyVerified => {}
-            _ => panic!("Expected AlreadyVerified error"),
-        };
-    }
-
-    #[test]
-    fn test_ticket_already_used_use_verification_ticket_request() {
-        let account = fake_account();
-        let mut verification_ticket = fake_verification_ticket(account.id);
-        verification_ticket.used_at = Some(chrono::Utc::now());
-        let http_request = UseVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            token: verification_ticket.token.clone(),
-        };
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            UseVerificationTicketRequestError::AlreadyUsed => {}
-            _ => panic!("Expected AlreadyUsed error"),
-        };
-    }
-
-    #[test]
-    fn test_ticket_cancelled_use_verification_ticket_request() {
-        let account = fake_account();
-        let mut verification_ticket = fake_verification_ticket(account.id);
-        verification_ticket.cancelled_at = Some(chrono::Utc::now());
-        let http_request = UseVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            token: verification_ticket.token.clone(),
-        };
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            UseVerificationTicketRequestError::Cancelled => {}
-            _ => panic!("Expected Cancelled error"),
-        };
-    }
-
-    #[test]
-    fn test_ticket_expired_use_verification_ticket_request() {
-        let account = fake_account();
-        let mut verification_ticket = fake_verification_ticket(account.id);
-        verification_ticket.expires_at = chrono::Utc::now() - chrono::Duration::minutes(1);
-        let http_request = UseVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            token: verification_ticket.token.clone(),
-        };
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            UseVerificationTicketRequestError::Expired => {}
-            _ => panic!("Expected Expired error"),
+            UseVerificationTicketRequestMappingError::InvalidTokenFormat(_) => {}
+            _ => panic!("Expected InvalidTokenFormat error"),
         };
     }
 
