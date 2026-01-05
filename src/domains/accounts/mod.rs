@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{keypair::EncryptedKeyPair, password::PasswordOps},
+    crypto::{jwt, keypair::EncryptedKeyPair, password::PasswordOps},
     newtypes::{Email, Opaque, Password},
 };
 use base64::{Engine, prelude::BASE64_URL_SAFE};
@@ -181,8 +181,6 @@ pub struct NewVerificationTicketRequest {
 
 #[derive(Debug, Error)]
 pub enum NewVerificationTicketRequestError {
-    // #[error("Invalid password format: {0}")]
-    // InvalidPasswordFormat(String),
     #[error("Password hash does not match")]
     InvalidPassword,
     #[error("Account is already verified")]
@@ -258,11 +256,27 @@ pub struct LoginRequest {
 }
 
 impl LoginRequest {
-    pub fn new(account_id: uuid::Uuid, access_token: Opaque<String>) -> Self {
-        LoginRequest {
-            account_id,
-            access_token,
+    pub fn new(
+        password: Password,
+        account: &Account,
+        jwt_secret: Opaque<String>,
+    ) -> Result<Self, LoginRequestError> {
+        if !account.verified {
+            return Err(LoginRequestError::AccountNotVerified);
         }
+
+        if password.verify(&account.password_hash).is_err() {
+            return Err(LoginRequestError::InvalidPassword);
+        }
+
+        let access_token = jwt::encode_jwt(account.id, &jwt_secret).map_err(|e| {
+            LoginRequestError::Unknown(anyhow::Error::new(e).context("failed to generate token"))
+        })?;
+
+        Ok(LoginRequest {
+            account_id: account.id,
+            access_token,
+        })
     }
 
     pub fn account_id(&self) -> &uuid::Uuid {
@@ -275,8 +289,6 @@ impl LoginRequest {
 
 #[derive(Debug, Error)]
 pub enum LoginRequestError {
-    #[error("Invalid password format: {0}")]
-    InvalidPasswordFormat(String),
     #[error("Password hash does not match")]
     InvalidPassword,
     #[error("Account is not verified")]
@@ -365,6 +377,98 @@ mod tests {
         match result.err().unwrap() {
             NewVerificationTicketRequestError::NotEnoughTimePassed => {}
             _ => panic!("Expected NotEnoughTimePassed error"),
+        };
+    }
+
+    // ################ LOGIN TESTS ################
+
+    #[test]
+    fn test_valid_new_verification_ticket_request_without_last_ticket() {
+        let mut account = fake_account();
+        let password = Faker.fake::<Password>();
+        account.password_hash = password.hash().unwrap().into();
+        let last_ticket = None;
+        let result = NewVerificationTicketRequest::new(password, &account, &last_ticket);
+        assert!(result.is_ok());
+        let new_ticket_request = result.unwrap();
+        assert_eq!(new_ticket_request.account_id(), &account.id);
+        assert_eq!(new_ticket_request.ticket_id_to_cancel(), &None);
+        assert!(
+            !new_ticket_request
+                .verification_ticket_token()
+                .unsafe_inner()
+                .is_empty()
+        );
+        assert!(new_ticket_request.verification_ticket_expires_at() > &chrono::Utc::now());
+    }
+
+    #[test]
+    fn test_valid_new_verification_ticket_request_with_last_ticket() {
+        let mut account = fake_account();
+        let password = Faker.fake::<Password>();
+        account.password_hash = password.hash().unwrap().into();
+        let mut last_ticket = fake_verification_ticket(account.id);
+        last_ticket.created_at = chrono::Utc::now() - chrono::Duration::minutes(6);
+        last_ticket.expires_at = chrono::Utc::now() + chrono::Duration::minutes(9);
+
+        let result =
+            NewVerificationTicketRequest::new(password, &account, &Some(last_ticket.clone()));
+        assert!(result.is_ok());
+        let new_ticket_request = result.unwrap();
+        assert_eq!(new_ticket_request.account_id(), &account.id);
+        assert_eq!(
+            new_ticket_request.ticket_id_to_cancel(),
+            &Some(last_ticket.id)
+        );
+        assert!(
+            !new_ticket_request
+                .verification_ticket_token()
+                .unsafe_inner()
+                .is_empty()
+        );
+        assert!(new_ticket_request.verification_ticket_expires_at() > &chrono::Utc::now());
+    }
+
+    #[test]
+    fn test_valid_login_request() {
+        let password = Faker.fake::<Password>();
+        let mut account = fake_account();
+        account.password_hash = password.hash().unwrap().into();
+        account.verified = true;
+        let jwt_secret = Opaque::new(Faker.fake::<String>());
+        let result = LoginRequest::new(password, &account, jwt_secret.clone());
+        assert!(result.is_ok());
+        let login_request = result.unwrap();
+        assert_eq!(login_request.account_id(), &account.id);
+        assert!(jwt::decode_and_validate_jwt(login_request.access_token(), &jwt_secret).is_ok());
+    }
+
+    #[test]
+    fn test_unverified_account_login_request() {
+        let password = Faker.fake::<Password>();
+        let mut account = fake_account();
+        account.password_hash = password.hash().unwrap().into();
+        account.verified = false;
+        let jwt_secret = Opaque::new(Faker.fake::<String>());
+        let result = LoginRequest::new(password, &account, jwt_secret);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            LoginRequestError::AccountNotVerified => {}
+            _ => panic!("Expected AccountNotVerified error"),
+        };
+    }
+
+    #[test]
+    fn test_invalid_password_login_request() {
+        let mut account = fake_account();
+        account.verified = true;
+        let password = Faker.fake::<Password>();
+        let jwt_secret = Opaque::new(Faker.fake::<String>());
+        let result = LoginRequest::new(password, &account, jwt_secret);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            LoginRequestError::InvalidPassword => {}
+            _ => panic!("Expected InvalidPassword error"),
         };
     }
 

@@ -7,7 +7,7 @@ use crate::{
     secrets,
 };
 
-use super::{ApiError, AppState, AuthorizedAccount, jwt};
+use super::{ApiError, AppState, AuthorizedAccount};
 use axum::{
     Json, Router,
     extract::State,
@@ -499,18 +499,20 @@ async fn login(
         })?;
 
     let login_request = body
-        .try_into_domain(&account, &jwt_secret)
+        .try_into_domain(&account, jwt_secret)
         .map_err(|e| match e {
-            LoginRequestError::InvalidPassword => {
-                ApiError::BadRequest("Invalid email or password".to_string())
-            }
-            LoginRequestError::InvalidPasswordFormat(msg) => {
+            LoginRequestMappingError::InvalidPasswordFormat(msg) => {
                 ApiError::BadRequest(format!("invalid password format: {msg}"))
             }
-            LoginRequestError::AccountNotVerified => {
-                ApiError::BadRequest("Account is not verified".to_string())
-            }
-            LoginRequestError::Unknown(err) => ApiError::InternalServerError(err),
+            LoginRequestMappingError::InvalidRequest(e) => match e {
+                LoginRequestError::InvalidPassword => {
+                    ApiError::BadRequest("Invalid email or password".to_string())
+                }
+                LoginRequestError::AccountNotVerified => {
+                    ApiError::BadRequest("Account is not verified".to_string())
+                }
+                LoginRequestError::Unknown(err) => ApiError::InternalServerError(err),
+            },
         })?;
 
     app_state
@@ -540,33 +542,29 @@ pub struct LoginRequestHttpBody {
     pub password: Opaque<String>,
 }
 
+#[derive(Debug)]
+enum LoginRequestMappingError {
+    InvalidPasswordFormat(String),
+    InvalidRequest(LoginRequestError),
+}
+
 impl LoginRequestHttpBody {
     fn try_into_domain(
         self,
         account: &Account,
-        jwt_secret: &Opaque<String>,
-    ) -> Result<LoginRequest, LoginRequestError> {
+        jwt_secret: Opaque<String>,
+    ) -> Result<LoginRequest, LoginRequestMappingError> {
         let password = Password::new(self.password.unsafe_inner()).map_err(|e| match e {
-            PasswordError::Empty => {
-                LoginRequestError::InvalidPasswordFormat("Password cannot be empty".to_string())
-            }
+            PasswordError::Empty => LoginRequestMappingError::InvalidPasswordFormat(
+                "Password cannot be empty".to_string(),
+            ),
             PasswordError::InvalidPassword(reason) => {
-                LoginRequestError::InvalidPasswordFormat(reason)
+                LoginRequestMappingError::InvalidPasswordFormat(reason)
             }
         })?;
-        if !account.verified {
-            return Err(LoginRequestError::AccountNotVerified);
-        }
 
-        if password.verify(&account.password_hash).is_err() {
-            return Err(LoginRequestError::InvalidPassword);
-        }
-
-        let access_token = jwt::encode_jwt(account.id, jwt_secret).map_err(|e| {
-            LoginRequestError::Unknown(anyhow::Error::new(e).context("failed to generate token"))
-        })?;
-
-        Ok(LoginRequest::new(account.id, access_token))
+        LoginRequest::new(password, account, jwt_secret)
+            .map_err(LoginRequestMappingError::InvalidRequest)
     }
 }
 
@@ -643,6 +641,8 @@ impl From<Account> for MeResponse {
 mod tests {
     use base64::prelude::BASE64_URL_SAFE;
     use fake::{Fake, Faker};
+
+    use crate::crypto::jwt;
 
     use super::*;
 
@@ -1008,30 +1008,11 @@ mod tests {
             password: password.unsafe_inner().to_owned().into(),
         };
         let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, &jwt_secret);
+        let result = http_request.try_into_domain(&account, jwt_secret.clone());
         assert!(result.is_ok());
         let login_request = result.unwrap();
         assert_eq!(login_request.account_id(), &account.id);
         assert!(jwt::decode_and_validate_jwt(login_request.access_token(), &jwt_secret).is_ok());
-    }
-
-    #[test]
-    fn test_unverified_account_login_request() {
-        let password = Faker.fake::<Password>();
-        let mut account = fake_account();
-        account.password_hash = password.hash().unwrap().into();
-        account.verified = false;
-        let http_request = LoginRequestHttpBody {
-            email: account.email.to_string(),
-            password: password.unsafe_inner().to_owned().into(),
-        };
-        let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, &jwt_secret);
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            LoginRequestError::AccountNotVerified => {}
-            _ => panic!("Expected AccountNotVerified error"),
-        };
     }
 
     #[test]
@@ -1045,29 +1026,11 @@ mod tests {
             password: Opaque::new("".to_string()), // Empty password
         };
         let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, &jwt_secret);
+        let result = http_request.try_into_domain(&account, jwt_secret);
         assert!(result.is_err());
         match result.err().unwrap() {
-            LoginRequestError::InvalidPasswordFormat(_) => {}
+            LoginRequestMappingError::InvalidPasswordFormat(_) => {}
             _ => panic!("Expected InvalidPasswordFormat error"),
-        };
-    }
-
-    #[test]
-    fn test_invalid_password_login_request() {
-        let mut account = fake_account();
-        account.verified = true;
-        let password = Faker.fake::<Password>();
-        let http_request = LoginRequestHttpBody {
-            email: account.email.to_string(),
-            password: password.unsafe_inner().to_owned().into(),
-        };
-        let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, &jwt_secret);
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            LoginRequestError::InvalidPassword => {}
-            _ => panic!("Expected InvalidPassword error"),
         };
     }
 

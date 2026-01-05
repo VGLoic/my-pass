@@ -33,6 +33,7 @@ pub enum JwtDecodeError {
     #[error(transparent)]
     InvalidToken(#[from] anyhow::Error),
 }
+// REMIND ME: REMOVE THIS FILE?
 
 /// Decodes the given JWT token using the provided secret, validates it and returns the account ID if valid.
 pub fn decode_and_validate_jwt(

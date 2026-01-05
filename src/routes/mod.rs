@@ -12,12 +12,12 @@ use thiserror::Error;
 use tracing::{error, warn};
 
 use crate::{
+    crypto::jwt,
     domains::accounts::{notifier::AccountsNotifier, repository::AccountsRepository},
     secrets::{self, SecretsManager},
 };
 
 pub mod accounts;
-mod jwt;
 
 pub fn app_router(
     secrets_manager: impl SecretsManager,
