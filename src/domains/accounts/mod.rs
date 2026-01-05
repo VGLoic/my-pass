@@ -1,8 +1,9 @@
 use crate::{
-    crypto::keypair::EncryptedKeyPair,
-    newtypes::{Email, Opaque},
+    crypto::{keypair::EncryptedKeyPair, password::PasswordOps},
+    newtypes::{Email, Opaque, Password},
 };
 use base64::{Engine, prelude::BASE64_URL_SAFE};
+use fake::rand;
 use sqlx::prelude::FromRow;
 use thiserror::Error;
 
@@ -180,8 +181,8 @@ pub struct NewVerificationTicketRequest {
 
 #[derive(Debug, Error)]
 pub enum NewVerificationTicketRequestError {
-    #[error("Invalid password format: {0}")]
-    InvalidPasswordFormat(String),
+    // #[error("Invalid password format: {0}")]
+    // InvalidPasswordFormat(String),
     #[error("Password hash does not match")]
     InvalidPassword,
     #[error("Account is already verified")]
@@ -194,21 +195,37 @@ pub enum NewVerificationTicketRequestError {
 
 impl NewVerificationTicketRequest {
     pub fn new(
-        account_id: uuid::Uuid,
-        ticket_id_to_cancel: Option<uuid::Uuid>,
-        verification_ticket_token: Opaque<[u8; 32]>,
-        verification_ticket_lifetime: chrono::Duration,
-    ) -> Self {
-        let verification_ticket_token =
-            BASE64_URL_SAFE.encode(verification_ticket_token.unsafe_inner());
+        password: Password,
+        account: &Account,
+        last_ticket: &Option<VerificationTicket>,
+    ) -> Result<Self, NewVerificationTicketRequestError> {
+        if password.verify(&account.password_hash).is_err() {
+            return Err(NewVerificationTicketRequestError::InvalidPassword);
+        }
+
+        if account.verified {
+            return Err(NewVerificationTicketRequestError::AlreadyVerified);
+        }
+
+        if let Some(existing_ticket) = last_ticket {
+            let min_interval = chrono::Duration::minutes(5);
+            let now = chrono::Utc::now();
+            if existing_ticket.created_at + min_interval > now {
+                return Err(NewVerificationTicketRequestError::NotEnoughTimePassed);
+            }
+        }
+
+        // Verification token is a base64url-encoded random 32-byte value
+        let verification_ticket_token = BASE64_URL_SAFE.encode(rand::random::<[u8; 32]>());
+        let verification_ticket_lifetime = chrono::Duration::minutes(15);
         let verification_ticket_expires_at = chrono::Utc::now() + verification_ticket_lifetime;
 
-        NewVerificationTicketRequest {
-            account_id,
-            ticket_id_to_cancel,
+        Ok(NewVerificationTicketRequest {
+            account_id: account.id,
+            ticket_id_to_cancel: last_ticket.as_ref().map(|t| t.id),
             verification_ticket_token: verification_ticket_token.into(),
             verification_ticket_expires_at,
-        }
+        })
     }
 
     pub fn account_id(&self) -> &uuid::Uuid {
@@ -298,4 +315,86 @@ pub enum FindLastVerificationTicketError {
     NoVerificationTicket(Account),
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::prelude::BASE64_URL_SAFE;
+    use fake::{Fake, Faker};
+
+    use super::*;
+
+    #[test]
+    fn test_invalid_new_verification_ticket_request_invalid_password() {
+        let account = fake_account();
+        let password = Faker.fake::<Password>();
+        let last_ticket = None;
+        let result = NewVerificationTicketRequest::new(password, &account, &last_ticket);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            NewVerificationTicketRequestError::InvalidPassword => {}
+            _ => panic!("Expected InvalidPassword error"),
+        };
+    }
+
+    #[test]
+    fn test_invalid_new_verification_ticket_request_account_already_verified() {
+        let mut account = fake_account();
+        let password = Faker.fake::<Password>();
+        account.password_hash = password.hash().unwrap().into();
+        account.verified = true;
+        let last_ticket = None;
+        let result = NewVerificationTicketRequest::new(password, &account, &last_ticket);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            NewVerificationTicketRequestError::AlreadyVerified => {}
+            _ => panic!("Expected AlreadyVerified error"),
+        };
+    }
+
+    #[test]
+    fn test_invalid_new_verification_ticket_request_not_enough_time_passed() {
+        let mut account = fake_account();
+        let password = Faker.fake::<Password>();
+        account.password_hash = password.hash().unwrap().into();
+        let mut last_ticket = fake_verification_ticket(account.id);
+        last_ticket.created_at = chrono::Utc::now() - chrono::Duration::minutes(4);
+        last_ticket.expires_at = chrono::Utc::now() + chrono::Duration::minutes(11);
+        let result = NewVerificationTicketRequest::new(password, &account, &Some(last_ticket));
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            NewVerificationTicketRequestError::NotEnoughTimePassed => {}
+            _ => panic!("Expected NotEnoughTimePassed error"),
+        };
+    }
+
+    fn fake_account() -> Account {
+        let password = Faker.fake::<Password>();
+        Account {
+            id: uuid::Uuid::new_v4(),
+            email: Faker.fake(),
+            password_hash: password.hash().unwrap().into(),
+            verified: false,
+            private_key_symmetric_key_salt: Opaque::new(Faker.fake::<[u8; 16]>()),
+            private_key_encryption_nonce: Opaque::new(Faker.fake::<[u8; 12]>()),
+            private_key_ciphertext: Opaque::new(vec![0u8; 64]),
+            public_key: Opaque::new(Faker.fake::<[u8; 32]>()),
+            last_login_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn fake_verification_ticket(account_id: uuid::Uuid) -> VerificationTicket {
+        VerificationTicket {
+            id: uuid::Uuid::new_v4(),
+            account_id,
+            token: Opaque::new(BASE64_URL_SAFE.encode(Faker.fake::<[u8; 32]>())),
+            expires_at: chrono::Utc::now() + chrono::Duration::minutes(15),
+            created_at: chrono::Utc::now(),
+            cancelled_at: None,
+            used_at: None,
+            updated_at: chrono::Utc::now(),
+        }
+    }
 }
