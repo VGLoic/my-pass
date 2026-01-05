@@ -1,8 +1,5 @@
 use crate::{
-    crypto::{
-        keypair::{EncryptedKeyPair, KeyPair},
-        password::PasswordOps,
-    },
+    crypto::keypair::{EncryptedKeyPair, KeyPair},
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
     secrets,
 };
@@ -18,7 +15,7 @@ use base64::{
     Engine,
     prelude::{BASE64_STANDARD, BASE64_URL_SAFE},
 };
-use fake::{Dummy, Fake, Faker, rand};
+use fake::{Dummy, Fake, Faker};
 use serde::{Deserialize, Serialize};
 
 use crate::domains::accounts::{
@@ -48,28 +45,30 @@ async fn sign_up(
     Json(body): Json<SignUpRequestHttpBody>,
 ) -> Result<StatusCode, ApiError> {
     let signup_request = body.try_into_domain().map_err(|e| match e {
-        SignupRequestError::InvalidEmailFormat(msg) => {
+        SignupRequestMappingError::EmailFormat(msg) => {
             ApiError::BadRequest(format!("invalid email format: {msg}"))
         }
-        SignupRequestError::InvalidPasswordFormat(msg) => {
+        SignupRequestMappingError::PasswordFormat(msg) => {
             ApiError::BadRequest(format!("invalid password format: {msg}"))
         }
-        SignupRequestError::InvalidSymmetricKeySaltFormat(msg) => {
+        SignupRequestMappingError::SymmetricKeySaltFormat(msg) => {
             ApiError::BadRequest(format!("invalid symmetric key salt format: {msg}"))
         }
-        SignupRequestError::InvalidEncryptionNonceFormat(msg) => {
+        SignupRequestMappingError::EncryptionNonceFormat(msg) => {
             ApiError::BadRequest(format!("invalid encryption nonce format: {msg}"))
         }
-        SignupRequestError::InvalidPrivateKeyCiphertextFormat(msg) => {
+        SignupRequestMappingError::PrivateKeyCiphertextFormat(msg) => {
             ApiError::BadRequest(format!("invalid ciphertext format: {msg}"))
         }
-        SignupRequestError::InvalidPublicKeyFormat(msg) => {
+        SignupRequestMappingError::PublicKeyFormat(msg) => {
             ApiError::BadRequest(format!("invalid public key format: {msg}"))
         }
-        SignupRequestError::InvalidKeyPair => {
+        SignupRequestMappingError::KeyPair => {
             ApiError::BadRequest("invalid key pair or nonce".to_string())
         }
-        SignupRequestError::Unknown(e) => ApiError::InternalServerError(e),
+        SignupRequestMappingError::Request(e) => match e {
+            SignupRequestError::Unknown(e) => ApiError::InternalServerError(e),
+        },
     })?;
 
     let (created_account, created_ticket) = app_state
@@ -118,35 +117,47 @@ pub struct EncryptedKeyPairHttpBody {
     pub public_key: Opaque<String>,
 }
 
+#[derive(Debug)]
+enum SignupRequestMappingError {
+    EmailFormat(String),
+    PasswordFormat(String),
+    SymmetricKeySaltFormat(String),
+    EncryptionNonceFormat(String),
+    PrivateKeyCiphertextFormat(String),
+    PublicKeyFormat(String),
+    KeyPair,
+    Request(SignupRequestError),
+}
+
 impl SignUpRequestHttpBody {
-    pub fn try_into_domain(self) -> Result<SignupRequest, SignupRequestError> {
+    fn try_into_domain(self) -> Result<SignupRequest, SignupRequestMappingError> {
         let email = Email::new(&self.email).map_err(|e| match e {
             EmailError::Empty => {
-                SignupRequestError::InvalidEmailFormat("Email cannot be empty".to_string())
+                SignupRequestMappingError::EmailFormat("Email cannot be empty".to_string())
             }
             EmailError::InvalidFormat => {
-                SignupRequestError::InvalidEmailFormat("Email format is invalid".to_string())
+                SignupRequestMappingError::EmailFormat("Email format is invalid".to_string())
             }
         })?;
         let password = Password::new(self.password.unsafe_inner()).map_err(|e| match e {
             PasswordError::Empty => {
-                SignupRequestError::InvalidPasswordFormat("Password cannot be empty".to_string())
+                SignupRequestMappingError::PasswordFormat("Password cannot be empty".to_string())
             }
             PasswordError::InvalidPassword(reason) => {
-                SignupRequestError::InvalidPasswordFormat(reason)
+                SignupRequestMappingError::PasswordFormat(reason)
             }
         })?;
 
         let decoded_symmetric_key_salt = BASE64_STANDARD
             .decode(self.encrypted_key_pair.symmetric_key_salt.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidSymmetricKeySaltFormat(format!(
+                SignupRequestMappingError::SymmetricKeySaltFormat(format!(
                     "Invalid base64 format: {}",
                     e
                 ))
             })?;
         if decoded_symmetric_key_salt.len() != 16 {
-            return Err(SignupRequestError::InvalidSymmetricKeySaltFormat(
+            return Err(SignupRequestMappingError::SymmetricKeySaltFormat(
                 "Symmetric key salt must be 16 bytes long".to_string(),
             ));
         }
@@ -155,13 +166,13 @@ impl SignUpRequestHttpBody {
         let decoded_encryption_nonce = BASE64_STANDARD
             .decode(self.encrypted_key_pair.encryption_nonce.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidEncryptionNonceFormat(format!(
+                SignupRequestMappingError::EncryptionNonceFormat(format!(
                     "Invalid base64 format: {}",
                     e
                 ))
             })?;
         if decoded_encryption_nonce.len() != 12 {
-            return Err(SignupRequestError::InvalidEncryptionNonceFormat(
+            return Err(SignupRequestMappingError::EncryptionNonceFormat(
                 "Encryption nonce must be 12 bytes long".to_string(),
             ));
         }
@@ -170,7 +181,7 @@ impl SignUpRequestHttpBody {
         let decoded_encrypted_key_pair = BASE64_STANDARD
             .decode(self.encrypted_key_pair.ciphertext.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidPrivateKeyCiphertextFormat(format!(
+                SignupRequestMappingError::PrivateKeyCiphertextFormat(format!(
                     "Invalid base64 format: {}",
                     e
                 ))
@@ -179,10 +190,10 @@ impl SignUpRequestHttpBody {
         let decoded_public_key = BASE64_STANDARD
             .decode(self.encrypted_key_pair.public_key.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidPublicKeyFormat(format!("Invalid base64 format: {}", e))
+                SignupRequestMappingError::PublicKeyFormat(format!("Invalid base64 format: {}", e))
             })?;
         if decoded_public_key.len() != 32 {
-            return Err(SignupRequestError::InvalidPublicKeyFormat(
+            return Err(SignupRequestMappingError::PublicKeyFormat(
                 "Public key must be 32 bytes long".to_string(),
             ));
         }
@@ -194,24 +205,10 @@ impl SignUpRequestHttpBody {
             decoded_public_key.into(),
             &password,
         )
-        .map_err(|_e| SignupRequestError::InvalidKeyPair)?;
+        .map_err(|_e| SignupRequestMappingError::KeyPair)?;
 
-        // Verification token is a base64url-encoded random 32-byte value
-        let verification_ticket_token: [u8; 32] = rand::random();
-
-        let verification_ticket_lifetime = chrono::Duration::minutes(15);
-
-        let password_hash = password
-            .hash()
-            .map_err(|e| e.context("Failed to hash password"))?;
-
-        Ok(SignupRequest::new(
-            email,
-            password_hash.into(),
-            encrypted_key_pair,
-            verification_ticket_token.into(),
-            verification_ticket_lifetime,
-        ))
+        SignupRequest::new(email, password, encrypted_key_pair)
+            .map_err(SignupRequestMappingError::Request)
     }
 }
 
@@ -622,7 +619,7 @@ mod tests {
     use base64::prelude::BASE64_URL_SAFE;
     use fake::{Fake, Faker};
 
-    use crate::crypto::jwt;
+    use crate::crypto::{jwt, password::PasswordOps};
 
     use super::*;
 
@@ -717,8 +714,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidEmailFormat(_) => {}
-            _ => panic!("Expected InvalidEmailFormat error"),
+            SignupRequestMappingError::EmailFormat(_) => {}
+            _ => panic!("Expected EmailFormat error"),
         };
     }
 
@@ -729,8 +726,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidPasswordFormat(_) => {}
-            _ => panic!("Expected InvalidPasswordFormat error"),
+            SignupRequestMappingError::PasswordFormat(_) => {}
+            _ => panic!("Expected PasswordFormat error"),
         };
     }
 
@@ -742,8 +739,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidSymmetricKeySaltFormat(_) => {}
-            _ => panic!("Expected InvalidSymmetricKeySaltFormat error"),
+            SignupRequestMappingError::SymmetricKeySaltFormat(_) => {}
+            _ => panic!("Expected SymmetricKeySaltFormat error"),
         };
     }
 
@@ -755,8 +752,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidSymmetricKeySaltFormat(_) => {}
-            _ => panic!("Expected InvalidSymmetricKeySaltFormat error"),
+            SignupRequestMappingError::SymmetricKeySaltFormat(_) => {}
+            _ => panic!("Expected SymmetricKeySaltFormat error"),
         };
     }
 
@@ -768,8 +765,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidEncryptionNonceFormat(_) => {}
-            _ => panic!("Expected InvalidEncryptionNonceFormat error"),
+            SignupRequestMappingError::EncryptionNonceFormat(_) => {}
+            _ => panic!("Expected EncryptionNonceFormat error"),
         };
     }
 
@@ -781,8 +778,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidEncryptionNonceFormat(_) => {}
-            _ => panic!("Expected InvalidEncryptionNonceFormat error"),
+            SignupRequestMappingError::EncryptionNonceFormat(_) => {}
+            _ => panic!("Expected EncryptionNonceFormat error"),
         };
     }
 
@@ -793,8 +790,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidPrivateKeyCiphertextFormat(_) => {}
-            _ => panic!("Expected InvalidPrivateKeyCiphertextFormat error"),
+            SignupRequestMappingError::PrivateKeyCiphertextFormat(_) => {}
+            _ => panic!("Expected PrivateKeyCiphertextFormat error"),
         };
     }
 
@@ -805,8 +802,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidPublicKeyFormat(_) => {}
-            _ => panic!("Expected InvalidPublicKeyFormat error"),
+            SignupRequestMappingError::PublicKeyFormat(_) => {}
+            _ => panic!("Expected PublicKeyFormat error"),
         };
     }
 
@@ -820,8 +817,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidKeyPair => {}
-            _ => panic!("Expected InvalidKeyPair error"),
+            SignupRequestMappingError::KeyPair => {}
+            _ => panic!("Expected KeyPair error"),
         };
     }
 
@@ -835,8 +832,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidKeyPair => {}
-            _ => panic!("Expected InvalidKeyPair error"),
+            SignupRequestMappingError::KeyPair => {}
+            _ => panic!("Expected KeyPair error"),
         };
     }
 
@@ -855,9 +852,9 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidKeyPair => {}
+            SignupRequestMappingError::KeyPair => {}
             e => {
-                panic!("Expected InvalidKeyPair error: {:?}", e)
+                panic!("Expected KeyPair error: {:?}", e)
             }
         };
     }

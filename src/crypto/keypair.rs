@@ -10,6 +10,7 @@ use super::argon2instance;
 use crate::newtypes::{Opaque, Password};
 
 /// Represents an encrypted key pair, including the necessary metadata for decryption.
+#[derive(Debug, Clone)]
 pub struct EncryptedKeyPair {
     /// Salt used to derive the symmetric encryption key
     symmetric_key_salt: Opaque<[u8; 16]>,

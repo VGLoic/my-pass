@@ -56,44 +56,34 @@ pub struct SignupRequest {
 
 #[derive(Debug, Error)]
 pub enum SignupRequestError {
-    #[error("Invalid email format: {0}")]
-    InvalidEmailFormat(String),
-    #[error("Invalid password format: {0}")]
-    InvalidPasswordFormat(String),
-    #[error("Invalid symmetric key salt format: {0}")]
-    InvalidSymmetricKeySaltFormat(String),
-    #[error("Invalid encryption nonce format: {0}")]
-    InvalidEncryptionNonceFormat(String),
-    #[error("Invalid private key ciphertext format: {0}")]
-    InvalidPrivateKeyCiphertextFormat(String),
-    #[error("Invalid public key format: {0}")]
-    InvalidPublicKeyFormat(String),
-    #[error("Invalid key pair or nonce")]
-    InvalidKeyPair,
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
 }
 
 impl SignupRequest {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         email: Email,
-        password_hash: Opaque<String>,
+        // REMIND ME: need to move password in key pair, otherwise, dev can cheat
+        password: Password,
         encrypted_key_pair: EncryptedKeyPair,
-        verification_ticket_token: Opaque<[u8; 32]>,
-        verification_ticket_lifetime: chrono::Duration,
-    ) -> Self {
-        let verification_ticket_token =
-            BASE64_URL_SAFE.encode(verification_ticket_token.unsafe_inner());
+    ) -> Result<Self, SignupRequestError> {
+        // Verification token is a base64url-encoded random 32-byte value
+        let verification_ticket_token = BASE64_URL_SAFE.encode(rand::random::<[u8; 32]>());
+
+        let verification_ticket_lifetime = chrono::Duration::minutes(15);
         let verification_ticket_expires_at = chrono::Utc::now() + verification_ticket_lifetime;
 
-        SignupRequest {
+        let password_hash = password
+            .hash()
+            .map_err(|e| e.context("Failed to hash password"))?;
+
+        Ok(SignupRequest {
             email,
-            password_hash,
+            password_hash: password_hash.into(),
             encrypted_key_pair,
             verification_ticket_token: verification_ticket_token.into(),
             verification_ticket_expires_at,
-        }
+        })
     }
 
     pub fn email(&self) -> &Email {
@@ -373,7 +363,63 @@ mod tests {
     use base64::prelude::BASE64_URL_SAFE;
     use fake::{Fake, Faker};
 
+    use crate::crypto::keypair::KeyPair;
+
     use super::*;
+
+    // ################ SIGNUP TESTS ################
+
+    #[test]
+    fn test_valid_signup_request() {
+        let email: Email = Faker.fake();
+        let password: Password = Faker.fake();
+
+        let key_pair = KeyPair::generate();
+        let encrypted_key_pair = key_pair.encrypt(&password).unwrap();
+
+        let result =
+            SignupRequest::new(email.clone(), password.clone(), encrypted_key_pair.clone());
+        assert!(result.is_ok());
+        let signup_request = result.unwrap();
+        assert_eq!(signup_request.email().as_str(), email.as_str());
+        assert_eq!(
+            signup_request
+                .encrypted_key_pair()
+                .public_key()
+                .unsafe_inner(),
+            encrypted_key_pair.public_key().unsafe_inner()
+        );
+        assert_eq!(
+            signup_request
+                .encrypted_key_pair()
+                .symmetric_key_salt()
+                .unsafe_inner(),
+            encrypted_key_pair.symmetric_key_salt().unsafe_inner()
+        );
+        assert_eq!(
+            signup_request
+                .encrypted_key_pair()
+                .encryption_nonce()
+                .unsafe_inner(),
+            encrypted_key_pair.encryption_nonce().unsafe_inner()
+        );
+        assert_eq!(
+            signup_request
+                .encrypted_key_pair()
+                .ciphertext()
+                .unsafe_inner(),
+            encrypted_key_pair.ciphertext().unsafe_inner()
+        );
+        assert!(password.verify(signup_request.password_hash()).is_ok());
+
+        assert!(
+            !signup_request
+                .verification_ticket_token()
+                .unsafe_inner()
+                .is_empty()
+        );
+        assert!(signup_request.verification_ticket_expires_at() > &chrono::Utc::now());
+    }
 
     // ################ NEW VERIFICATION TICKET TESTS ################
 
