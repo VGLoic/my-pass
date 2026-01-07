@@ -10,6 +10,9 @@ use thiserror::Error;
 pub mod notifier;
 pub mod repository;
 
+#[cfg(test)]
+pub mod testutil;
+
 // ##################################################
 // ############### ACCOUNT DEFINITION ###############
 // ##################################################
@@ -365,6 +368,7 @@ mod tests {
 
     use crate::crypto::keypair::KeyPair;
 
+    use super::testutil::{fake_account, fake_verification_ticket};
     use super::*;
 
     // ################ SIGNUP TESTS ################
@@ -684,35 +688,5 @@ mod tests {
             LoginRequestError::InvalidPassword => {}
             _ => panic!("Expected InvalidPassword error"),
         };
-    }
-
-    fn fake_account() -> Account {
-        let password = Faker.fake::<Password>();
-        Account {
-            id: uuid::Uuid::new_v4(),
-            email: Faker.fake(),
-            password_hash: password.hash().unwrap().into(),
-            verified: false,
-            private_key_symmetric_key_salt: Opaque::new(Faker.fake::<[u8; 16]>()),
-            private_key_encryption_nonce: Opaque::new(Faker.fake::<[u8; 12]>()),
-            private_key_ciphertext: Opaque::new(vec![0u8; 64]),
-            public_key: Opaque::new(Faker.fake::<[u8; 32]>()),
-            last_login_at: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }
-    }
-
-    fn fake_verification_ticket(account_id: uuid::Uuid) -> VerificationTicket {
-        VerificationTicket {
-            id: uuid::Uuid::new_v4(),
-            account_id,
-            token: Opaque::new(BASE64_URL_SAFE.encode(Faker.fake::<[u8; 32]>())),
-            expires_at: chrono::Utc::now() + chrono::Duration::minutes(15),
-            created_at: chrono::Utc::now(),
-            cancelled_at: None,
-            used_at: None,
-            updated_at: chrono::Utc::now(),
-        }
     }
 }
