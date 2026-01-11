@@ -915,7 +915,9 @@ mod tests {
         assert!(result.is_ok());
         let login_request = result.unwrap();
         assert_eq!(login_request.account_id(), &account.id);
-        assert!(jwt::decode_and_validate_jwt(login_request.access_token(), &jwt_secret).is_ok());
+        assert!(
+            jwt::decode_and_validate_jwt(login_request.access_token().clone(), jwt_secret).is_ok()
+        );
     }
 
     #[test]

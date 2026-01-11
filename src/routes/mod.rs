@@ -124,7 +124,7 @@ impl FromRequestParts<AppState> for AuthorizedAccount {
             })?;
 
         let account_id =
-            jwt::decode_and_validate_jwt(&token.into(), &jwt_secret).map_err(|e| match e {
+            jwt::decode_and_validate_jwt(token.into(), jwt_secret).map_err(|e| match e {
                 jwt::JwtDecodeError::InvalidToken(err) => {
                     AuthError::InvalidToken(format!("{:?}", err))
                 }

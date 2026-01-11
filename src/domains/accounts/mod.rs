@@ -301,9 +301,8 @@ impl LoginRequest {
             return Err(LoginRequestError::InvalidPassword);
         }
 
-        let access_token = jwt::encode_jwt(account.id, &jwt_secret).map_err(|e| {
-            LoginRequestError::Unknown(anyhow::Error::new(e).context("failed to generate token"))
-        })?;
+        let access_token = jwt::encode_jwt(account.id, jwt_secret)
+            .map_err(|e| anyhow::Error::new(e).context("failed to generate token"))?;
 
         Ok(LoginRequest {
             account_id: account.id,
@@ -658,7 +657,9 @@ mod tests {
         assert!(result.is_ok());
         let login_request = result.unwrap();
         assert_eq!(login_request.account_id(), &account.id);
-        assert!(jwt::decode_and_validate_jwt(login_request.access_token(), &jwt_secret).is_ok());
+        assert!(
+            jwt::decode_and_validate_jwt(login_request.access_token().clone(), jwt_secret).is_ok()
+        );
     }
 
     #[test]
