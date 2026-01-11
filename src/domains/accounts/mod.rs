@@ -66,8 +66,6 @@ pub enum SignupRequestError {
 impl SignupRequest {
     pub fn new(
         email: Email,
-        // REMIND ME: need to move password in key pair, otherwise, dev can cheat
-        password: Password,
         encrypted_key_pair: EncryptedKeyPair,
     ) -> Result<Self, SignupRequestError> {
         // Verification token is a base64url-encoded random 32-byte value
@@ -76,7 +74,8 @@ impl SignupRequest {
         let verification_ticket_lifetime = chrono::Duration::minutes(15);
         let verification_ticket_expires_at = chrono::Utc::now() + verification_ticket_lifetime;
 
-        let password_hash = password
+        let password_hash = encrypted_key_pair
+            .password()
             .hash()
             .map_err(|e| e.context("Failed to hash password"))?;
 
@@ -378,10 +377,9 @@ mod tests {
         let password: Password = Faker.fake();
 
         let key_pair = KeyPair::generate();
-        let encrypted_key_pair = key_pair.encrypt(&password).unwrap();
+        let encrypted_key_pair = key_pair.encrypt(password.clone()).unwrap();
 
-        let result =
-            SignupRequest::new(email.clone(), password.clone(), encrypted_key_pair.clone());
+        let result = SignupRequest::new(email.clone(), encrypted_key_pair.clone());
         assert!(result.is_ok());
         let signup_request = result.unwrap();
         assert_eq!(signup_request.email().as_str(), email.as_str());

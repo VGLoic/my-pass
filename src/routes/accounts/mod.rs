@@ -199,16 +199,15 @@ impl SignUpRequestHttpBody {
         }
         let decoded_public_key: [u8; 32] = slice_to_array(&decoded_public_key);
         let encrypted_key_pair = EncryptedKeyPair::new(
+            password,
             decoded_symmetric_key_salt.into(),
             decoded_encryption_nonce.into(),
             decoded_encrypted_key_pair.into(),
             decoded_public_key.into(),
-            &password,
         )
         .map_err(|_e| SignupRequestMappingError::KeyPair)?;
 
-        SignupRequest::new(email, password, encrypted_key_pair)
-            .map_err(SignupRequestMappingError::Request)
+        SignupRequest::new(email, encrypted_key_pair).map_err(SignupRequestMappingError::Request)
     }
 }
 
@@ -224,7 +223,7 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
         let password: Password = Faker.fake_with_rng(rng);
 
         let key_pair = KeyPair::generate();
-        let encrypted_key_pair = key_pair.encrypt(&password).unwrap();
+        let encrypted_key_pair = key_pair.encrypt(password.clone()).unwrap();
 
         SignUpRequestHttpBody {
             email: email.to_string(),
