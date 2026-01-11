@@ -12,12 +12,12 @@ use thiserror::Error;
 use tracing::{error, warn};
 
 use crate::{
+    crypto::jwt,
     domains::accounts::{notifier::AccountsNotifier, repository::AccountsRepository},
     secrets::{self, SecretsManager},
 };
 
 pub mod accounts;
-mod jwt;
 
 pub fn app_router(
     secrets_manager: impl SecretsManager,
@@ -124,7 +124,7 @@ impl FromRequestParts<AppState> for AuthorizedAccount {
             })?;
 
         let account_id =
-            jwt::decode_and_validate_jwt(&token.into(), &jwt_secret).map_err(|e| match e {
+            jwt::decode_and_validate_jwt(token.into(), jwt_secret).map_err(|e| match e {
                 jwt::JwtDecodeError::InvalidToken(err) => {
                     AuthError::InvalidToken(format!("{:?}", err))
                 }

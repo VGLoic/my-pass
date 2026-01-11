@@ -1,13 +1,10 @@
 use crate::{
-    crypto::{
-        keypair::{EncryptedKeyPair, KeyPair},
-        password::PasswordOps,
-    },
+    crypto::keypair::{EncryptedKeyPair, KeyPair},
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
     secrets,
 };
 
-use super::{ApiError, AppState, AuthorizedAccount, jwt};
+use super::{ApiError, AppState, AuthorizedAccount};
 use axum::{
     Json, Router,
     extract::State,
@@ -18,7 +15,7 @@ use base64::{
     Engine,
     prelude::{BASE64_STANDARD, BASE64_URL_SAFE},
 };
-use fake::{Dummy, Fake, Faker, rand};
+use fake::{Dummy, Fake, Faker};
 use serde::{Deserialize, Serialize};
 
 use crate::domains::accounts::{
@@ -48,28 +45,30 @@ async fn sign_up(
     Json(body): Json<SignUpRequestHttpBody>,
 ) -> Result<StatusCode, ApiError> {
     let signup_request = body.try_into_domain().map_err(|e| match e {
-        SignupRequestError::InvalidEmailFormat(msg) => {
+        SignupRequestMappingError::EmailFormat(msg) => {
             ApiError::BadRequest(format!("invalid email format: {msg}"))
         }
-        SignupRequestError::InvalidPasswordFormat(msg) => {
+        SignupRequestMappingError::PasswordFormat(msg) => {
             ApiError::BadRequest(format!("invalid password format: {msg}"))
         }
-        SignupRequestError::InvalidSymmetricKeySaltFormat(msg) => {
+        SignupRequestMappingError::SymmetricKeySaltFormat(msg) => {
             ApiError::BadRequest(format!("invalid symmetric key salt format: {msg}"))
         }
-        SignupRequestError::InvalidEncryptionNonceFormat(msg) => {
+        SignupRequestMappingError::EncryptionNonceFormat(msg) => {
             ApiError::BadRequest(format!("invalid encryption nonce format: {msg}"))
         }
-        SignupRequestError::InvalidPrivateKeyCiphertextFormat(msg) => {
+        SignupRequestMappingError::PrivateKeyCiphertextFormat(msg) => {
             ApiError::BadRequest(format!("invalid ciphertext format: {msg}"))
         }
-        SignupRequestError::InvalidPublicKeyFormat(msg) => {
+        SignupRequestMappingError::PublicKeyFormat(msg) => {
             ApiError::BadRequest(format!("invalid public key format: {msg}"))
         }
-        SignupRequestError::InvalidKeyPair => {
+        SignupRequestMappingError::KeyPair => {
             ApiError::BadRequest("invalid key pair or nonce".to_string())
         }
-        SignupRequestError::Unknown(e) => ApiError::InternalServerError(e),
+        SignupRequestMappingError::Request(e) => match e {
+            SignupRequestError::Unknown(e) => ApiError::InternalServerError(e),
+        },
     })?;
 
     let (created_account, created_ticket) = app_state
@@ -118,35 +117,47 @@ pub struct EncryptedKeyPairHttpBody {
     pub public_key: Opaque<String>,
 }
 
+#[derive(Debug)]
+enum SignupRequestMappingError {
+    EmailFormat(String),
+    PasswordFormat(String),
+    SymmetricKeySaltFormat(String),
+    EncryptionNonceFormat(String),
+    PrivateKeyCiphertextFormat(String),
+    PublicKeyFormat(String),
+    KeyPair,
+    Request(SignupRequestError),
+}
+
 impl SignUpRequestHttpBody {
-    pub fn try_into_domain(self) -> Result<SignupRequest, SignupRequestError> {
+    fn try_into_domain(self) -> Result<SignupRequest, SignupRequestMappingError> {
         let email = Email::new(&self.email).map_err(|e| match e {
             EmailError::Empty => {
-                SignupRequestError::InvalidEmailFormat("Email cannot be empty".to_string())
+                SignupRequestMappingError::EmailFormat("Email cannot be empty".to_string())
             }
             EmailError::InvalidFormat => {
-                SignupRequestError::InvalidEmailFormat("Email format is invalid".to_string())
+                SignupRequestMappingError::EmailFormat("Email format is invalid".to_string())
             }
         })?;
         let password = Password::new(self.password.unsafe_inner()).map_err(|e| match e {
             PasswordError::Empty => {
-                SignupRequestError::InvalidPasswordFormat("Password cannot be empty".to_string())
+                SignupRequestMappingError::PasswordFormat("Password cannot be empty".to_string())
             }
             PasswordError::InvalidPassword(reason) => {
-                SignupRequestError::InvalidPasswordFormat(reason)
+                SignupRequestMappingError::PasswordFormat(reason)
             }
         })?;
 
         let decoded_symmetric_key_salt = BASE64_STANDARD
             .decode(self.encrypted_key_pair.symmetric_key_salt.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidSymmetricKeySaltFormat(format!(
+                SignupRequestMappingError::SymmetricKeySaltFormat(format!(
                     "Invalid base64 format: {}",
                     e
                 ))
             })?;
         if decoded_symmetric_key_salt.len() != 16 {
-            return Err(SignupRequestError::InvalidSymmetricKeySaltFormat(
+            return Err(SignupRequestMappingError::SymmetricKeySaltFormat(
                 "Symmetric key salt must be 16 bytes long".to_string(),
             ));
         }
@@ -155,13 +166,13 @@ impl SignUpRequestHttpBody {
         let decoded_encryption_nonce = BASE64_STANDARD
             .decode(self.encrypted_key_pair.encryption_nonce.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidEncryptionNonceFormat(format!(
+                SignupRequestMappingError::EncryptionNonceFormat(format!(
                     "Invalid base64 format: {}",
                     e
                 ))
             })?;
         if decoded_encryption_nonce.len() != 12 {
-            return Err(SignupRequestError::InvalidEncryptionNonceFormat(
+            return Err(SignupRequestMappingError::EncryptionNonceFormat(
                 "Encryption nonce must be 12 bytes long".to_string(),
             ));
         }
@@ -170,7 +181,7 @@ impl SignUpRequestHttpBody {
         let decoded_encrypted_key_pair = BASE64_STANDARD
             .decode(self.encrypted_key_pair.ciphertext.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidPrivateKeyCiphertextFormat(format!(
+                SignupRequestMappingError::PrivateKeyCiphertextFormat(format!(
                     "Invalid base64 format: {}",
                     e
                 ))
@@ -179,39 +190,24 @@ impl SignUpRequestHttpBody {
         let decoded_public_key = BASE64_STANDARD
             .decode(self.encrypted_key_pair.public_key.unsafe_inner())
             .map_err(|e| {
-                SignupRequestError::InvalidPublicKeyFormat(format!("Invalid base64 format: {}", e))
+                SignupRequestMappingError::PublicKeyFormat(format!("Invalid base64 format: {}", e))
             })?;
         if decoded_public_key.len() != 32 {
-            return Err(SignupRequestError::InvalidPublicKeyFormat(
+            return Err(SignupRequestMappingError::PublicKeyFormat(
                 "Public key must be 32 bytes long".to_string(),
             ));
         }
         let decoded_public_key: [u8; 32] = slice_to_array(&decoded_public_key);
         let encrypted_key_pair = EncryptedKeyPair::new(
+            password,
             decoded_symmetric_key_salt.into(),
             decoded_encryption_nonce.into(),
             decoded_encrypted_key_pair.into(),
             decoded_public_key.into(),
-            &password,
         )
-        .map_err(|_e| SignupRequestError::InvalidKeyPair)?;
+        .map_err(|_e| SignupRequestMappingError::KeyPair)?;
 
-        // Verification token is a base64url-encoded random 32-byte value
-        let verification_ticket_token: [u8; 32] = rand::random();
-
-        let verification_ticket_lifetime = chrono::Duration::minutes(15);
-
-        let password_hash = password
-            .hash()
-            .map_err(|e| e.context("Failed to hash password"))?;
-
-        Ok(SignupRequest::new(
-            email,
-            password_hash.into(),
-            encrypted_key_pair,
-            verification_ticket_token.into(),
-            verification_ticket_lifetime,
-        ))
+        SignupRequest::new(email, encrypted_key_pair).map_err(SignupRequestMappingError::Request)
     }
 }
 
@@ -227,7 +223,7 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
         let password: Password = Faker.fake_with_rng(rng);
 
         let key_pair = KeyPair::generate();
-        let encrypted_key_pair = key_pair.encrypt(&password).unwrap();
+        let encrypted_key_pair = key_pair.encrypt(password.clone()).unwrap();
 
         SignUpRequestHttpBody {
             email: email.to_string(),
@@ -276,22 +272,29 @@ async fn use_verification_ticket(
 
     let use_verification_ticket_request =
         body.try_into_domain(account, ticket).map_err(|e| match e {
-            UseVerificationTicketRequestError::AlreadyVerified => {
-                ApiError::BadRequest("Account is already verified".to_string())
-            }
-            UseVerificationTicketRequestError::AlreadyUsed => {
-                ApiError::BadRequest("Verification ticket has already been used".to_string())
-            }
-            UseVerificationTicketRequestError::Cancelled => {
-                ApiError::BadRequest("Verification ticket has been cancelled".to_string())
-            }
-            UseVerificationTicketRequestError::Expired => {
-                ApiError::BadRequest("Verification ticket has expired".to_string())
-            }
-            UseVerificationTicketRequestError::InvalidToken => {
+            UseVerificationTicketRequestMappingError::InvalidTokenFormat(_msg) => {
                 ApiError::BadRequest("Invalid verification ticket token".to_string())
             }
-            UseVerificationTicketRequestError::Unknown(err) => ApiError::InternalServerError(err),
+            UseVerificationTicketRequestMappingError::InvalidRequest(e) => match e {
+                UseVerificationTicketRequestError::AlreadyVerified => {
+                    ApiError::BadRequest("Account is already verified".to_string())
+                }
+                UseVerificationTicketRequestError::AlreadyUsed => {
+                    ApiError::BadRequest("Verification ticket has already been used".to_string())
+                }
+                UseVerificationTicketRequestError::Cancelled => {
+                    ApiError::BadRequest("Verification ticket has been cancelled".to_string())
+                }
+                UseVerificationTicketRequestError::Expired => {
+                    ApiError::BadRequest("Verification ticket has expired".to_string())
+                }
+                UseVerificationTicketRequestError::InvalidToken => {
+                    ApiError::BadRequest("Invalid verification ticket token".to_string())
+                }
+                UseVerificationTicketRequestError::Unknown(err) => {
+                    ApiError::InternalServerError(err)
+                }
+            },
         })?;
 
     app_state
@@ -313,55 +316,28 @@ pub struct UseVerificationTicketRequestHttpBody {
     pub token: Opaque<String>,
 }
 
+#[derive(Debug)]
+enum UseVerificationTicketRequestMappingError {
+    InvalidTokenFormat(String),
+    InvalidRequest(UseVerificationTicketRequestError),
+}
+
 impl UseVerificationTicketRequestHttpBody {
-    pub fn try_into_domain(
+    fn try_into_domain(
         self,
         account: Account,
         verification_ticket: VerificationTicket,
-    ) -> Result<UseVerificationTicketRequest, UseVerificationTicketRequestError> {
-        if account.verified {
-            return Err(UseVerificationTicketRequestError::AlreadyVerified);
-        }
-
-        if verification_ticket.used_at.is_some() {
-            return Err(UseVerificationTicketRequestError::AlreadyUsed);
-        }
-
-        if verification_ticket.cancelled_at.is_some() {
-            return Err(UseVerificationTicketRequestError::Cancelled);
-        }
-
-        if verification_ticket.expires_at < chrono::Utc::now() {
-            return Err(UseVerificationTicketRequestError::Expired);
-        }
-
-        // Constant time comparison to prevent timing attacks
+    ) -> Result<UseVerificationTicketRequest, UseVerificationTicketRequestMappingError> {
         let decoded_input = BASE64_URL_SAFE
             .decode(self.token.unsafe_inner())
-            .map_err(|_| UseVerificationTicketRequestError::InvalidToken)?;
-        let decoded_stored = BASE64_URL_SAFE
-            .decode(verification_ticket.token.unsafe_inner())
-            .map_err(|_| UseVerificationTicketRequestError::InvalidToken)?;
+            .map_err(|_| {
+                UseVerificationTicketRequestMappingError::InvalidTokenFormat(
+                    "Invalid token format".to_string(),
+                )
+            })?;
 
-        let compared_input = if decoded_input.len() != decoded_stored.len() {
-            // If lengths differ, create a dummy vector of the same length as stored token
-            vec![0u8; decoded_stored.len()]
-        } else {
-            decoded_input
-        };
-        let equal_side_by_side = compared_input
-            .iter()
-            .zip(decoded_stored.iter())
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-            == 0;
-        if !equal_side_by_side {
-            return Err(UseVerificationTicketRequestError::InvalidToken);
-        }
-
-        Ok(UseVerificationTicketRequest::new(
-            account.id,
-            verification_ticket.id,
-        ))
+        UseVerificationTicketRequest::new(account, verification_ticket, decoded_input.into())
+            .map_err(UseVerificationTicketRequestMappingError::InvalidRequest)
     }
 }
 
@@ -398,19 +374,23 @@ async fn new_verification_ticket(
     let domain_request = body
         .try_into_domain(&account, &last_verification_ticket)
         .map_err(|e| match e {
-            NewVerificationTicketRequestError::InvalidPasswordFormat(msg) => {
+            NewVerificationTicketRequestMappingError::InvalidPasswordFormat(msg) => {
                 ApiError::BadRequest(format!("invalid password format: {msg}"))
             }
-            NewVerificationTicketRequestError::InvalidPassword => {
-                ApiError::BadRequest("Invalid password".to_string())
-            }
-            NewVerificationTicketRequestError::AlreadyVerified => {
-                ApiError::BadRequest("Account is already verified".to_string())
-            }
-            NewVerificationTicketRequestError::NotEnoughTimePassed => ApiError::BadRequest(
-                "Not enough time has passed since the last ticket was created".to_string(),
-            ),
-            NewVerificationTicketRequestError::Unknown(err) => ApiError::InternalServerError(err),
+            NewVerificationTicketRequestMappingError::InvalidRequest(e) => match e {
+                NewVerificationTicketRequestError::InvalidPassword => {
+                    ApiError::BadRequest("Invalid password".to_string())
+                }
+                NewVerificationTicketRequestError::AlreadyVerified => {
+                    ApiError::BadRequest("Account is already verified".to_string())
+                }
+                NewVerificationTicketRequestError::NotEnoughTimePassed => ApiError::BadRequest(
+                    "Not enough time has passed since the last ticket was created".to_string(),
+                ),
+                NewVerificationTicketRequestError::Unknown(err) => {
+                    ApiError::InternalServerError(err)
+                }
+            },
         })?;
 
     // Cancel existing ticket if any and create a new one
@@ -436,48 +416,31 @@ pub struct NewVerificationTicketRequestHttpBody {
     pub password: Opaque<String>,
 }
 
+#[derive(Debug)]
+enum NewVerificationTicketRequestMappingError {
+    InvalidPasswordFormat(String),
+    InvalidRequest(NewVerificationTicketRequestError),
+}
+
 impl NewVerificationTicketRequestHttpBody {
     fn try_into_domain(
         self,
         account: &Account,
         ticket: &Option<VerificationTicket>,
-    ) -> Result<NewVerificationTicketRequest, NewVerificationTicketRequestError> {
+    ) -> Result<NewVerificationTicketRequest, NewVerificationTicketRequestMappingError> {
         let password = Password::new(self.password.unsafe_inner()).map_err(|e| match e {
-            PasswordError::Empty => NewVerificationTicketRequestError::InvalidPasswordFormat(
-                "Password cannot be empty".to_string(),
-            ),
+            PasswordError::Empty => {
+                NewVerificationTicketRequestMappingError::InvalidPasswordFormat(
+                    "Password cannot be empty".to_string(),
+                )
+            }
             PasswordError::InvalidPassword(reason) => {
-                NewVerificationTicketRequestError::InvalidPasswordFormat(reason)
+                NewVerificationTicketRequestMappingError::InvalidPasswordFormat(reason)
             }
         })?;
 
-        if password.verify(&account.password_hash).is_err() {
-            return Err(NewVerificationTicketRequestError::InvalidPassword);
-        }
-
-        if account.verified {
-            return Err(NewVerificationTicketRequestError::AlreadyVerified);
-        }
-
-        if let Some(existing_ticket) = ticket {
-            let min_interval = chrono::Duration::minutes(5);
-            let now = chrono::Utc::now();
-            if existing_ticket.created_at + min_interval > now {
-                return Err(NewVerificationTicketRequestError::NotEnoughTimePassed);
-            }
-        }
-
-        // Verification token is a base64url-encoded random 32-byte value
-        let verification_ticket_token: [u8; 32] = rand::random();
-
-        let verification_ticket_lifetime = chrono::Duration::minutes(15);
-
-        Ok(NewVerificationTicketRequest::new(
-            account.id,
-            ticket.as_ref().map(|t| t.id),
-            verification_ticket_token.into(),
-            verification_ticket_lifetime,
-        ))
+        NewVerificationTicketRequest::new(password, account, ticket)
+            .map_err(NewVerificationTicketRequestMappingError::InvalidRequest)
     }
 }
 
@@ -512,18 +475,20 @@ async fn login(
         })?;
 
     let login_request = body
-        .try_into_domain(&account, &jwt_secret)
+        .try_into_domain(&account, jwt_secret)
         .map_err(|e| match e {
-            LoginRequestError::InvalidPassword => {
-                ApiError::BadRequest("Invalid email or password".to_string())
-            }
-            LoginRequestError::InvalidPasswordFormat(msg) => {
+            LoginRequestMappingError::InvalidPasswordFormat(msg) => {
                 ApiError::BadRequest(format!("invalid password format: {msg}"))
             }
-            LoginRequestError::AccountNotVerified => {
-                ApiError::BadRequest("Account is not verified".to_string())
-            }
-            LoginRequestError::Unknown(err) => ApiError::InternalServerError(err),
+            LoginRequestMappingError::InvalidRequest(e) => match e {
+                LoginRequestError::InvalidPassword => {
+                    ApiError::BadRequest("Invalid email or password".to_string())
+                }
+                LoginRequestError::AccountNotVerified => {
+                    ApiError::BadRequest("Account is not verified".to_string())
+                }
+                LoginRequestError::Unknown(err) => ApiError::InternalServerError(err),
+            },
         })?;
 
     app_state
@@ -553,33 +518,29 @@ pub struct LoginRequestHttpBody {
     pub password: Opaque<String>,
 }
 
+#[derive(Debug)]
+enum LoginRequestMappingError {
+    InvalidPasswordFormat(String),
+    InvalidRequest(LoginRequestError),
+}
+
 impl LoginRequestHttpBody {
     fn try_into_domain(
         self,
         account: &Account,
-        jwt_secret: &Opaque<String>,
-    ) -> Result<LoginRequest, LoginRequestError> {
+        jwt_secret: Opaque<String>,
+    ) -> Result<LoginRequest, LoginRequestMappingError> {
         let password = Password::new(self.password.unsafe_inner()).map_err(|e| match e {
-            PasswordError::Empty => {
-                LoginRequestError::InvalidPasswordFormat("Password cannot be empty".to_string())
-            }
+            PasswordError::Empty => LoginRequestMappingError::InvalidPasswordFormat(
+                "Password cannot be empty".to_string(),
+            ),
             PasswordError::InvalidPassword(reason) => {
-                LoginRequestError::InvalidPasswordFormat(reason)
+                LoginRequestMappingError::InvalidPasswordFormat(reason)
             }
         })?;
-        if !account.verified {
-            return Err(LoginRequestError::AccountNotVerified);
-        }
 
-        if password.verify(&account.password_hash).is_err() {
-            return Err(LoginRequestError::InvalidPassword);
-        }
-
-        let access_token = jwt::encode_jwt(account.id, jwt_secret).map_err(|e| {
-            LoginRequestError::Unknown(anyhow::Error::new(e).context("failed to generate token"))
-        })?;
-
-        Ok(LoginRequest::new(account.id, access_token))
+        LoginRequest::new(password, account, jwt_secret)
+            .map_err(LoginRequestMappingError::InvalidRequest)
     }
 }
 
@@ -654,8 +615,10 @@ impl From<Account> for MeResponse {
 
 #[cfg(test)]
 mod tests {
-    use base64::prelude::BASE64_URL_SAFE;
     use fake::{Fake, Faker};
+
+    use crate::crypto::{jwt, password::PasswordOps};
+    use crate::domains::accounts::testutil::{fake_account, fake_verification_ticket};
 
     use super::*;
 
@@ -750,8 +713,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidEmailFormat(_) => {}
-            _ => panic!("Expected InvalidEmailFormat error"),
+            SignupRequestMappingError::EmailFormat(_) => {}
+            _ => panic!("Expected EmailFormat error"),
         };
     }
 
@@ -762,8 +725,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidPasswordFormat(_) => {}
-            _ => panic!("Expected InvalidPasswordFormat error"),
+            SignupRequestMappingError::PasswordFormat(_) => {}
+            _ => panic!("Expected PasswordFormat error"),
         };
     }
 
@@ -775,8 +738,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidSymmetricKeySaltFormat(_) => {}
-            _ => panic!("Expected InvalidSymmetricKeySaltFormat error"),
+            SignupRequestMappingError::SymmetricKeySaltFormat(_) => {}
+            _ => panic!("Expected SymmetricKeySaltFormat error"),
         };
     }
 
@@ -788,8 +751,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidSymmetricKeySaltFormat(_) => {}
-            _ => panic!("Expected InvalidSymmetricKeySaltFormat error"),
+            SignupRequestMappingError::SymmetricKeySaltFormat(_) => {}
+            _ => panic!("Expected SymmetricKeySaltFormat error"),
         };
     }
 
@@ -801,8 +764,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidEncryptionNonceFormat(_) => {}
-            _ => panic!("Expected InvalidEncryptionNonceFormat error"),
+            SignupRequestMappingError::EncryptionNonceFormat(_) => {}
+            _ => panic!("Expected EncryptionNonceFormat error"),
         };
     }
 
@@ -814,8 +777,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidEncryptionNonceFormat(_) => {}
-            _ => panic!("Expected InvalidEncryptionNonceFormat error"),
+            SignupRequestMappingError::EncryptionNonceFormat(_) => {}
+            _ => panic!("Expected EncryptionNonceFormat error"),
         };
     }
 
@@ -826,8 +789,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidPrivateKeyCiphertextFormat(_) => {}
-            _ => panic!("Expected InvalidPrivateKeyCiphertextFormat error"),
+            SignupRequestMappingError::PrivateKeyCiphertextFormat(_) => {}
+            _ => panic!("Expected PrivateKeyCiphertextFormat error"),
         };
     }
 
@@ -838,8 +801,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidPublicKeyFormat(_) => {}
-            _ => panic!("Expected InvalidPublicKeyFormat error"),
+            SignupRequestMappingError::PublicKeyFormat(_) => {}
+            _ => panic!("Expected PublicKeyFormat error"),
         };
     }
 
@@ -853,8 +816,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidKeyPair => {}
-            _ => panic!("Expected InvalidKeyPair error"),
+            SignupRequestMappingError::KeyPair => {}
+            _ => panic!("Expected KeyPair error"),
         };
     }
 
@@ -868,8 +831,8 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidKeyPair => {}
-            _ => panic!("Expected InvalidKeyPair error"),
+            SignupRequestMappingError::KeyPair => {}
+            _ => panic!("Expected KeyPair error"),
         };
     }
 
@@ -888,9 +851,9 @@ mod tests {
         let result = signup_request.try_into_domain();
         assert!(result.is_err());
         match result.err().unwrap() {
-            SignupRequestError::InvalidKeyPair => {}
+            SignupRequestMappingError::KeyPair => {}
             e => {
-                panic!("Expected InvalidKeyPair error: {:?}", e)
+                panic!("Expected KeyPair error: {:?}", e)
             }
         };
     }
@@ -923,88 +886,14 @@ mod tests {
             email: account.email.to_string(),
             token: verification_ticket.token.clone(),
         };
-        // Corrupt the token
-        let corrupted_token = {
-            let mut token_bytes = BASE64_URL_SAFE
-                .decode(http_request.token.unsafe_inner())
-                .unwrap();
-            token_bytes[0] ^= 0xFF; // Flip some bits
-            BASE64_URL_SAFE.encode(token_bytes)
-        };
-        http_request.token = Opaque::new(corrupted_token);
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
+        // Badly encoded token
+        let badly_encoded_token = "!!!invalid_base64!!!".to_string();
+        http_request.token = Opaque::new(badly_encoded_token);
+        let result = http_request.try_into_domain(account, verification_ticket);
         assert!(result.is_err());
         match result.err().unwrap() {
-            UseVerificationTicketRequestError::InvalidToken => {}
-            _ => panic!("Expected InvalidToken error"),
-        };
-    }
-
-    #[test]
-    fn test_account_already_verified_use_verification_ticket_request() {
-        let mut account = fake_account();
-        account.verified = true;
-        let verification_ticket = fake_verification_ticket(account.id);
-        let http_request = UseVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            token: verification_ticket.token.clone(),
-        };
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            UseVerificationTicketRequestError::AlreadyVerified => {}
-            _ => panic!("Expected AlreadyVerified error"),
-        };
-    }
-
-    #[test]
-    fn test_ticket_already_used_use_verification_ticket_request() {
-        let account = fake_account();
-        let mut verification_ticket = fake_verification_ticket(account.id);
-        verification_ticket.used_at = Some(chrono::Utc::now());
-        let http_request = UseVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            token: verification_ticket.token.clone(),
-        };
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            UseVerificationTicketRequestError::AlreadyUsed => {}
-            _ => panic!("Expected AlreadyUsed error"),
-        };
-    }
-
-    #[test]
-    fn test_ticket_cancelled_use_verification_ticket_request() {
-        let account = fake_account();
-        let mut verification_ticket = fake_verification_ticket(account.id);
-        verification_ticket.cancelled_at = Some(chrono::Utc::now());
-        let http_request = UseVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            token: verification_ticket.token.clone(),
-        };
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            UseVerificationTicketRequestError::Cancelled => {}
-            _ => panic!("Expected Cancelled error"),
-        };
-    }
-
-    #[test]
-    fn test_ticket_expired_use_verification_ticket_request() {
-        let account = fake_account();
-        let mut verification_ticket = fake_verification_ticket(account.id);
-        verification_ticket.expires_at = chrono::Utc::now() - chrono::Duration::minutes(1);
-        let http_request = UseVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            token: verification_ticket.token.clone(),
-        };
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            UseVerificationTicketRequestError::Expired => {}
-            _ => panic!("Expected Expired error"),
+            UseVerificationTicketRequestMappingError::InvalidTokenFormat(_) => {}
+            _ => panic!("Expected InvalidTokenFormat error"),
         };
     }
 
@@ -1021,30 +910,13 @@ mod tests {
             password: password.unsafe_inner().to_owned().into(),
         };
         let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, &jwt_secret);
+        let result = http_request.try_into_domain(&account, jwt_secret.clone());
         assert!(result.is_ok());
         let login_request = result.unwrap();
         assert_eq!(login_request.account_id(), &account.id);
-        assert!(jwt::decode_and_validate_jwt(login_request.access_token(), &jwt_secret).is_ok());
-    }
-
-    #[test]
-    fn test_unverified_account_login_request() {
-        let password = Faker.fake::<Password>();
-        let mut account = fake_account();
-        account.password_hash = password.hash().unwrap().into();
-        account.verified = false;
-        let http_request = LoginRequestHttpBody {
-            email: account.email.to_string(),
-            password: password.unsafe_inner().to_owned().into(),
-        };
-        let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, &jwt_secret);
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            LoginRequestError::AccountNotVerified => {}
-            _ => panic!("Expected AccountNotVerified error"),
-        };
+        assert!(
+            jwt::decode_and_validate_jwt(login_request.access_token().clone(), jwt_secret).is_ok()
+        );
     }
 
     #[test]
@@ -1058,29 +930,11 @@ mod tests {
             password: Opaque::new("".to_string()), // Empty password
         };
         let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, &jwt_secret);
+        let result = http_request.try_into_domain(&account, jwt_secret);
         assert!(result.is_err());
         match result.err().unwrap() {
-            LoginRequestError::InvalidPasswordFormat(_) => {}
+            LoginRequestMappingError::InvalidPasswordFormat(_) => {}
             _ => panic!("Expected InvalidPasswordFormat error"),
-        };
-    }
-
-    #[test]
-    fn test_invalid_password_login_request() {
-        let mut account = fake_account();
-        account.verified = true;
-        let password = Faker.fake::<Password>();
-        let http_request = LoginRequestHttpBody {
-            email: account.email.to_string(),
-            password: password.unsafe_inner().to_owned().into(),
-        };
-        let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, &jwt_secret);
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            LoginRequestError::InvalidPassword => {}
-            _ => panic!("Expected InvalidPassword error"),
         };
     }
 
@@ -1088,36 +942,6 @@ mod tests {
         let mut bytes = BASE64_STANDARD.decode(base64_str).unwrap();
         bytes[0] ^= 0xFF; // Flip some bits
         BASE64_STANDARD.encode(bytes)
-    }
-
-    fn fake_account() -> Account {
-        let password = Faker.fake::<Password>();
-        Account {
-            id: uuid::Uuid::new_v4(),
-            email: Faker.fake(),
-            password_hash: password.hash().unwrap().into(),
-            verified: false,
-            private_key_symmetric_key_salt: Opaque::new(Faker.fake::<[u8; 16]>()),
-            private_key_encryption_nonce: Opaque::new(Faker.fake::<[u8; 12]>()),
-            private_key_ciphertext: Opaque::new(vec![0u8; 64]),
-            public_key: Opaque::new(Faker.fake::<[u8; 32]>()),
-            last_login_at: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }
-    }
-
-    fn fake_verification_ticket(account_id: uuid::Uuid) -> VerificationTicket {
-        VerificationTicket {
-            id: uuid::Uuid::new_v4(),
-            account_id,
-            token: Opaque::new(BASE64_URL_SAFE.encode(Faker.fake::<[u8; 32]>())),
-            expires_at: chrono::Utc::now() + chrono::Duration::minutes(15),
-            created_at: chrono::Utc::now(),
-            cancelled_at: None,
-            used_at: None,
-            updated_at: chrono::Utc::now(),
-        }
     }
 
     // ################ NEW VERIFICATION TICKET TESTS ################
@@ -1189,64 +1013,8 @@ mod tests {
         let result = http_request.try_into_domain(&account, &last_ticket);
         assert!(result.is_err());
         match result.err().unwrap() {
-            NewVerificationTicketRequestError::InvalidPasswordFormat(_) => {}
+            NewVerificationTicketRequestMappingError::InvalidPasswordFormat(_) => {}
             _ => panic!("Expected InvalidPasswordFormat error"),
-        };
-    }
-
-    #[test]
-    fn test_invalid_new_verification_ticket_request_invalid_password() {
-        let account = fake_account();
-        let password = Faker.fake::<Password>();
-        let http_request = NewVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            password: password.unsafe_inner().to_owned().into(), // Different password
-        };
-        let last_ticket = None;
-        let result = http_request.try_into_domain(&account, &last_ticket);
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            NewVerificationTicketRequestError::InvalidPassword => {}
-            _ => panic!("Expected InvalidPassword error"),
-        };
-    }
-
-    #[test]
-    fn test_invalid_new_verification_ticket_request_account_already_verified() {
-        let mut account = fake_account();
-        let password = Faker.fake::<Password>();
-        account.password_hash = password.hash().unwrap().into();
-        account.verified = true;
-        let http_request = NewVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            password: password.unsafe_inner().to_owned().into(),
-        };
-        let last_ticket = None;
-        let result = http_request.try_into_domain(&account, &last_ticket);
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            NewVerificationTicketRequestError::AlreadyVerified => {}
-            _ => panic!("Expected AlreadyVerified error"),
-        };
-    }
-
-    #[test]
-    fn test_invalid_new_verification_ticket_request_not_enough_time_passed() {
-        let mut account = fake_account();
-        let password = Faker.fake::<Password>();
-        account.password_hash = password.hash().unwrap().into();
-        let mut last_ticket = fake_verification_ticket(account.id);
-        last_ticket.created_at = chrono::Utc::now() - chrono::Duration::minutes(4);
-        last_ticket.expires_at = chrono::Utc::now() + chrono::Duration::minutes(11);
-        let http_request = NewVerificationTicketRequestHttpBody {
-            email: account.email.to_string(),
-            password: password.unsafe_inner().to_owned().into(),
-        };
-        let result = http_request.try_into_domain(&account, &Some(last_ticket.clone()));
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            NewVerificationTicketRequestError::NotEnoughTimePassed => {}
-            _ => panic!("Expected NotEnoughTimePassed error"),
         };
     }
 }

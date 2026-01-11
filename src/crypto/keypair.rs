@@ -10,7 +10,10 @@ use super::argon2instance;
 use crate::newtypes::{Opaque, Password};
 
 /// Represents an encrypted key pair, including the necessary metadata for decryption.
+#[derive(Debug, Clone)]
 pub struct EncryptedKeyPair {
+    /// Password used for encryption/decryption
+    password: Password,
     /// Salt used to derive the symmetric encryption key
     symmetric_key_salt: Opaque<[u8; 16]>,
     /// Nonce used for the encryption
@@ -25,17 +28,17 @@ impl EncryptedKeyPair {
     /// Creates a new encrypted key pair.
     /// The validity of the encrypted data is checked by attempting to decrypt it with the provided password.
     /// # Arguments
+    /// * `password` - Password used to derive the decryption key
     /// * `symmetric_key_salt` - Salt used to derive the symmetric encryption key
     /// * `encryption_nonce` - Nonce used for the encryption
     /// * `ciphertext` - Encrypted private key ciphertext
     /// * `public_key` - Public key corresponding to the encrypted private key
-    /// * `password` - Password used to derive the decryption key
     pub fn new(
+        password: Password,
         symmetric_key_salt: Opaque<[u8; 16]>,
         encryption_nonce: Opaque<[u8; 12]>,
         ciphertext: Opaque<Vec<u8>>,
         public_key: Opaque<[u8; 32]>,
-        password: &Password,
     ) -> Result<Self, anyhow::Error> {
         let mut encryption_key_material = [0u8; 32];
         argon2instance::argon2_instance()
@@ -77,6 +80,7 @@ impl EncryptedKeyPair {
         }
 
         Ok(Self {
+            password,
             symmetric_key_salt,
             encryption_nonce,
             ciphertext,
@@ -84,6 +88,9 @@ impl EncryptedKeyPair {
         })
     }
 
+    pub fn password(&self) -> &Password {
+        &self.password
+    }
     pub fn symmetric_key_salt(&self) -> &Opaque<[u8; 16]> {
         &self.symmetric_key_salt
     }
@@ -121,7 +128,7 @@ impl KeyPair {
     /// The encryption is performed using AES-256-GCM, with a symmetric key derived from the password using Argon2id.
     /// # Arguments
     /// * `password` - Password used to derive the encryption key
-    pub fn encrypt(&self, password: &Password) -> Result<EncryptedKeyPair, anyhow::Error> {
+    pub fn encrypt(&self, password: Password) -> Result<EncryptedKeyPair, anyhow::Error> {
         let symmetric_key_salt: [u8; 16] = rand::random();
 
         let mut symmetric_key_material = [0u8; 32];
@@ -148,6 +155,7 @@ impl KeyPair {
             .map_err(|e| anyhow!("{e}").context("failed to encrypt private key"))?;
 
         Ok(EncryptedKeyPair {
+            password,
             symmetric_key_salt: symmetric_key_salt.into(),
             encryption_nonce: encryption_nonce.into(),
             ciphertext: ciphertext.into(),
