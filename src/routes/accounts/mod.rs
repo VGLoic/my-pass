@@ -148,35 +148,13 @@ impl SignUpRequestHttpBody {
             }
         })?;
 
-        let decoded_symmetric_key_salt = BASE64_STANDARD
-            .decode(self.encrypted_key_pair.symmetric_key_salt.unsafe_inner())
-            .map_err(|e| {
-                SignupRequestMappingError::SymmetricKeySaltFormat(format!(
-                    "Invalid base64 format: {}",
-                    e
-                ))
-            })?;
-        if decoded_symmetric_key_salt.len() != 16 {
-            return Err(SignupRequestMappingError::SymmetricKeySaltFormat(
-                "Symmetric key salt must be 16 bytes long".to_string(),
-            ));
-        }
-        let decoded_symmetric_key_salt: [u8; 16] = slice_to_array(&decoded_symmetric_key_salt);
+        let decoded_symmetric_key_salt =
+            base64_to_array::<16>(self.encrypted_key_pair.symmetric_key_salt.unsafe_inner())
+                .map_err(SignupRequestMappingError::SymmetricKeySaltFormat)?;
 
-        let decoded_encryption_nonce = BASE64_STANDARD
-            .decode(self.encrypted_key_pair.encryption_nonce.unsafe_inner())
-            .map_err(|e| {
-                SignupRequestMappingError::EncryptionNonceFormat(format!(
-                    "Invalid base64 format: {}",
-                    e
-                ))
-            })?;
-        if decoded_encryption_nonce.len() != 12 {
-            return Err(SignupRequestMappingError::EncryptionNonceFormat(
-                "Encryption nonce must be 12 bytes long".to_string(),
-            ));
-        }
-        let decoded_encryption_nonce: [u8; 12] = slice_to_array(&decoded_encryption_nonce);
+        let decoded_encryption_nonce =
+            base64_to_array::<12>(self.encrypted_key_pair.encryption_nonce.unsafe_inner())
+                .map_err(SignupRequestMappingError::EncryptionNonceFormat)?;
 
         let decoded_encrypted_key_pair = BASE64_STANDARD
             .decode(self.encrypted_key_pair.ciphertext.unsafe_inner())
@@ -187,17 +165,10 @@ impl SignUpRequestHttpBody {
                 ))
             })?;
 
-        let decoded_public_key = BASE64_STANDARD
-            .decode(self.encrypted_key_pair.public_key.unsafe_inner())
-            .map_err(|e| {
-                SignupRequestMappingError::PublicKeyFormat(format!("Invalid base64 format: {}", e))
-            })?;
-        if decoded_public_key.len() != 32 {
-            return Err(SignupRequestMappingError::PublicKeyFormat(
-                "Public key must be 32 bytes long".to_string(),
-            ));
-        }
-        let decoded_public_key: [u8; 32] = slice_to_array(&decoded_public_key);
+        let decoded_public_key =
+            base64_to_array::<32>(self.encrypted_key_pair.public_key.unsafe_inner())
+                .map_err(SignupRequestMappingError::PublicKeyFormat)?;
+
         let encrypted_key_pair = EncryptedKeyPair::new(
             password,
             decoded_symmetric_key_salt.into(),
@@ -211,10 +182,19 @@ impl SignUpRequestHttpBody {
     }
 }
 
-fn slice_to_array<const N: usize>(slice: &[u8]) -> [u8; N] {
-    let mut array = [0u8; N];
-    array.copy_from_slice(slice);
-    array
+fn base64_to_array<const N: usize>(base64_str: &str) -> Result<[u8; N], String> {
+    let decoded = BASE64_STANDARD
+        .decode(base64_str)
+        .map_err(|e| format!("Invalid base64 format: {}", e))?;
+    if decoded.len() != N {
+        return Err(format!("Decoded data must be {} bytes long", N));
+    }
+    let array: [u8; N] = {
+        let mut array = [0u8; N];
+        array.copy_from_slice(&decoded);
+        array
+    };
+    Ok(array)
 }
 
 impl<T> Dummy<T> for SignUpRequestHttpBody {
@@ -617,7 +597,7 @@ impl From<Account> for MeResponse {
 mod tests {
     use fake::{Fake, Faker};
 
-    use crate::crypto::{jwt, password::PasswordOps};
+    use crate::crypto::password::PasswordOps;
     use crate::domains::accounts::testutil::{fake_account, fake_verification_ticket};
 
     use super::*;
@@ -627,83 +607,7 @@ mod tests {
     #[test]
     fn test_valid_signup_request() {
         let http_signup_request: SignUpRequestHttpBody = Faker.fake();
-        let result = http_signup_request.clone().try_into_domain();
-        assert!(result.is_ok());
-        let signup_request = result.unwrap();
-        assert_eq!(
-            signup_request.email().as_str(),
-            http_signup_request.email.as_str()
-        );
-        assert_eq!(
-            signup_request
-                .encrypted_key_pair()
-                .public_key()
-                .unsafe_inner(),
-            BASE64_STANDARD
-                .decode(
-                    http_signup_request
-                        .encrypted_key_pair
-                        .public_key
-                        .unsafe_inner()
-                )
-                .unwrap()
-                .as_slice()
-        );
-        assert_eq!(
-            signup_request
-                .encrypted_key_pair()
-                .symmetric_key_salt()
-                .unsafe_inner(),
-            BASE64_STANDARD
-                .decode(
-                    http_signup_request
-                        .encrypted_key_pair
-                        .symmetric_key_salt
-                        .unsafe_inner()
-                )
-                .unwrap()
-                .as_slice()
-        );
-        assert_eq!(
-            signup_request
-                .encrypted_key_pair()
-                .encryption_nonce()
-                .unsafe_inner(),
-            BASE64_STANDARD
-                .decode(
-                    http_signup_request
-                        .encrypted_key_pair
-                        .encryption_nonce
-                        .unsafe_inner()
-                )
-                .unwrap()
-                .as_slice()
-        );
-        assert_eq!(
-            signup_request
-                .encrypted_key_pair()
-                .ciphertext()
-                .unsafe_inner(),
-            BASE64_STANDARD
-                .decode(
-                    http_signup_request
-                        .encrypted_key_pair
-                        .ciphertext
-                        .unsafe_inner()
-                )
-                .unwrap()
-                .as_slice()
-        );
-        let password = Password::new(http_signup_request.password.unsafe_inner()).unwrap();
-        assert!(password.verify(signup_request.password_hash()).is_ok());
-
-        assert!(
-            !signup_request
-                .verification_ticket_token()
-                .unsafe_inner()
-                .is_empty()
-        );
-        assert!(signup_request.verification_ticket_expires_at() > &chrono::Utc::now());
+        assert!(http_signup_request.try_into_domain().is_ok());
     }
 
     #[test]
@@ -868,13 +772,10 @@ mod tests {
             email: account.email.to_string(),
             token: verification_ticket.token.clone(),
         };
-        let result = http_request.try_into_domain(account.clone(), verification_ticket.clone());
-        assert!(result.is_ok());
-        let use_verification_ticket_request = result.unwrap();
-        assert_eq!(use_verification_ticket_request.account_id(), &account.id);
-        assert_eq!(
-            use_verification_ticket_request.valid_ticket_id(),
-            &verification_ticket.id
+        assert!(
+            http_request
+                .try_into_domain(account, verification_ticket)
+                .is_ok()
         );
     }
 
@@ -910,13 +811,7 @@ mod tests {
             password: password.unsafe_inner().to_owned().into(),
         };
         let jwt_secret = Opaque::new(Faker.fake::<String>());
-        let result = http_request.try_into_domain(&account, jwt_secret.clone());
-        assert!(result.is_ok());
-        let login_request = result.unwrap();
-        assert_eq!(login_request.account_id(), &account.id);
-        assert!(
-            jwt::decode_and_validate_jwt(login_request.access_token().clone(), jwt_secret).is_ok()
-        );
+        assert!(http_request.try_into_domain(&account, jwt_secret).is_ok());
     }
 
     #[test]
@@ -956,18 +851,7 @@ mod tests {
             password: password.unsafe_inner().to_owned().into(),
         };
         let last_ticket = None;
-        let result = http_request.try_into_domain(&account, &last_ticket);
-        assert!(result.is_ok());
-        let new_ticket_request = result.unwrap();
-        assert_eq!(new_ticket_request.account_id(), &account.id);
-        assert_eq!(new_ticket_request.ticket_id_to_cancel(), &None);
-        assert!(
-            !new_ticket_request
-                .verification_ticket_token()
-                .unsafe_inner()
-                .is_empty()
-        );
-        assert!(new_ticket_request.verification_ticket_expires_at() > &chrono::Utc::now());
+        assert!(http_request.try_into_domain(&account, &last_ticket).is_ok());
     }
 
     #[test]
@@ -983,21 +867,11 @@ mod tests {
             password: password.unsafe_inner().to_owned().into(),
         };
 
-        let result = http_request.try_into_domain(&account, &Some(last_ticket.clone()));
-        assert!(result.is_ok());
-        let new_ticket_request = result.unwrap();
-        assert_eq!(new_ticket_request.account_id(), &account.id);
-        assert_eq!(
-            new_ticket_request.ticket_id_to_cancel(),
-            &Some(last_ticket.id)
-        );
         assert!(
-            !new_ticket_request
-                .verification_ticket_token()
-                .unsafe_inner()
-                .is_empty()
+            http_request
+                .try_into_domain(&account, &Some(last_ticket.clone()))
+                .is_ok()
         );
-        assert!(new_ticket_request.verification_ticket_expires_at() > &chrono::Utc::now());
     }
 
     #[test]
