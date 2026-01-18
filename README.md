@@ -92,3 +92,81 @@ This repository uses [`sqlx`](https://github.com/launchbadge/sqlx) for database 
 
 - If you encounter connection errors, verify that your database is running and your `.env` configuration is correct.
 - For more details, see the [`sqlx-cli` documentation](https://github.com/launchbadge/sqlx/blob/main/sqlx-cli/README.md) and the [`sqlx` docs](https://github.com/launchbadge/sqlx).
+
+## Architecture: Domain-Driven Design
+
+This project follows a domain-driven architecture that separates concerns across distinct layers:
+
+### Layer Structure
+
+1. **Routes Layer** - HTTP handlers that orchestrate requests
+2. **Domain Layer** - Business logic encapsulated in models and services
+3. **Repository Layer** - Data persistence abstraction
+4. **Notifier Layer** - External notifications (e.g., email)
+
+### Request Flow
+
+The typical request flow follows this pattern:
+
+```
+HTTP Request → Route Handler (parsing) → Domain Model (business logic validation) 
+→ Service → Repository → Database
+```
+
+### Example: Signup Request
+
+**1. Route Handler** - Parses HTTP body and deserializes data:
+```rust
+async fn sign_up(
+    State(app_state): State<AppState>,
+    Json(body): Json<SignUpRequestHttpBody>,  // ← Deserialization happens here
+) -> Result<StatusCode, ApiError> {
+    // Parsing: convert base64 strings to byte arrays
+    let email = Email::new(&body.email)
+        .map_err(|e| /* map parsing errors to HTTP errors */)?;
+    
+    // Pass parsed data to domain constructor
+    let domain_request = body.try_into_domain()
+        .map_err(|e| /* map domain errors to HTTP errors */)?;
+    
+    app_state.accounts_service.signup(domain_request).await?;
+    Ok(StatusCode::CREATED)
+}
+```
+
+**2. Domain Model** - Encapsulates business logic validation:
+```rust
+impl SignupRequest {
+    pub fn new(
+        email: Email,
+        encrypted_key_pair: EncryptedKeyPair,
+    ) -> Result<Self, SignupRequestError> {
+        // Business logic: generate verification token and calculate expiry
+        let verification_ticket_token = BASE64_URL_SAFE.encode(rand::random::<[u8; 32]>());
+        let verification_ticket_lifetime = chrono::Duration::minutes(15);
+        let verification_ticket_expires_at = chrono::Utc::now() + verification_ticket_lifetime;
+        
+        // Construct request with validated/derived state
+        Ok(SignupRequest { /* ... */ })
+    }
+}
+```
+
+**3. Service** - Orchestrates repository and notifier:
+```rust
+async fn signup(
+    &self,
+    request: SignupRequest,
+) -> Result<(Account, VerificationTicket), CreateAccountError> {
+    let (account, ticket) = self.repository.create_account(&request).await?;
+    self.notifier.account_signed_up(&account, &ticket).await;
+    info!("Account created with email: {}", account.email);
+    Ok((account, ticket))
+}
+```
+
+### Separation of Concerns
+
+- **Route Handler**: Responsible for HTTP parsing and deserialization (base64 decoding, format validation)
+- **Domain Constructor**: Responsible for business logic validation and state preparation (token generation, expiry calculation)
+- **Service**: Responsible for orchestrating repository and notification operations
