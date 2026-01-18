@@ -13,7 +13,7 @@ use tracing::{error, warn};
 
 use crate::{
     crypto::jwt,
-    domains::accounts::{repository::AccountsRepository, service::AccountsService},
+    domains::accounts::service::AccountsService,
     secrets::{self, SecretsManager},
 };
 
@@ -21,12 +21,10 @@ pub mod accounts;
 
 pub fn app_router(
     secrets_manager: impl SecretsManager,
-    accounts_repository: impl AccountsRepository,
     accounts_service: impl AccountsService,
 ) -> Router {
     let app_state = AppState {
         secrets_manager: Arc::new(secrets_manager),
-        accounts_repository: Arc::new(accounts_repository),
         accounts_service: Arc::new(accounts_service),
     };
     Router::new()
@@ -39,7 +37,6 @@ pub fn app_router(
 #[derive(Clone)]
 pub struct AppState {
     secrets_manager: Arc<dyn SecretsManager>,
-    accounts_repository: Arc<dyn AccountsRepository>,
     accounts_service: Arc<dyn AccountsService>,
 }
 

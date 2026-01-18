@@ -1,11 +1,13 @@
 use super::models::{
-    Account, CreateAccountError, LoginError, LoginRequest, NewVerificationTicketError,
-    NewVerificationTicketRequest, SignupRequest, UseVerificationTicketError,
-    UseVerificationTicketRequest, VerificationTicket,
+    Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginError,
+    LoginRequest, NewVerificationTicketError, NewVerificationTicketRequest, SignupRequest,
+    UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
 };
 use super::notifier::AccountsNotifier;
 use super::repository::AccountsRepository;
+use crate::newtypes::Email;
 use tracing::info;
+use uuid::Uuid;
 
 /// Service trait for managing accounts.
 #[async_trait::async_trait]
@@ -55,6 +57,30 @@ pub trait AccountsService: Send + Sync + 'static {
     /// Returns [LoginRequestError] if login fails.
     /// * [LoginRequestError::Unknown] - If an unknown error occurs during login.
     async fn login(&self, request: LoginRequest) -> Result<Account, LoginError>;
+
+    /// Retrieves an [Account] by its email.
+    /// # Arguments
+    /// * `email` - The email of the account to retrieve.
+    /// # Errors
+    /// Returns [FindAccountError] if retrieval fails.
+    async fn find_account_by_email(&self, email: &Email) -> Result<Account, FindAccountError>;
+
+    /// Retrieves an [Account] by its ID.
+    /// # Arguments
+    /// * `account_id` - The UUID of the account to retrieve.
+    /// # Errors
+    /// Returns [FindAccountError] if retrieval fails.
+    async fn find_account_by_id(&self, account_id: Uuid) -> Result<Account, FindAccountError>;
+
+    /// Retrieves an [Account] along with its last [VerificationTicket] by email.
+    /// # Arguments
+    /// * `email` - The email of the account to retrieve.
+    /// # Errors
+    /// Returns [FindLastVerificationTicketError] if retrieval fails.
+    async fn find_account_and_last_verification_ticket_by_email(
+        &self,
+        email: &Email,
+    ) -> Result<(Account, VerificationTicket), FindLastVerificationTicketError>;
 }
 
 pub struct DefaultAccountsService<Repository: AccountsRepository, Notifier: AccountsNotifier> {
@@ -138,5 +164,22 @@ where
         info!("Account logged in with email: {}", &account.email);
 
         Ok(account)
+    }
+
+    async fn find_account_by_email(&self, email: &Email) -> Result<Account, FindAccountError> {
+        self.repository.find_account_by_email(email).await
+    }
+
+    async fn find_account_by_id(&self, account_id: Uuid) -> Result<Account, FindAccountError> {
+        self.repository.find_account_by_id(account_id).await
+    }
+
+    async fn find_account_and_last_verification_ticket_by_email(
+        &self,
+        email: &Email,
+    ) -> Result<(Account, VerificationTicket), FindLastVerificationTicketError> {
+        self.repository
+            .find_account_and_last_verification_ticket_by_email(email)
+            .await
     }
 }

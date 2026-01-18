@@ -231,7 +231,7 @@ async fn use_verification_ticket(
         EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
     })?;
     let (account, ticket) = app_state
-        .accounts_repository
+        .accounts_service
         .find_account_and_last_verification_ticket_by_email(&email)
         .await
         .map_err(|e| match e {
@@ -321,7 +321,7 @@ async fn new_verification_ticket(
         EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
     })?;
     let (account, last_verification_ticket) = match app_state
-        .accounts_repository
+        .accounts_service
         .find_account_and_last_verification_ticket_by_email(&email)
         .await
     {
@@ -418,7 +418,7 @@ async fn login(
         EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
     })?;
     let account = app_state
-        .accounts_repository
+        .accounts_service
         .find_account_by_email(&email)
         .await
         .map_err(|e| match e {
@@ -510,7 +510,7 @@ async fn get_me(
     authorized_account: AuthorizedAccount,
 ) -> Result<Json<MeResponse>, ApiError> {
     let account = app_state
-        .accounts_repository
+        .accounts_service
         .find_account_by_id(authorized_account.account_id)
         .await
         .map_err(|e| match e {

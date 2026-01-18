@@ -99,11 +99,11 @@ pub async fn setup_instance(
         my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool);
     let accounts_notifier = FakeAccountsNotifier::new();
     let accounts_service = my_pass::domains::accounts::service::DefaultAccountsService::new(
-        accounts_repository.clone(),
+        accounts_repository,
         accounts_notifier.clone(),
     );
 
-    let app = app_router(secrets_manager, accounts_repository, accounts_service).layer(
+    let app = app_router(secrets_manager, accounts_service).layer(
         TraceLayer::new_for_http()
             .make_span_with(|request: &Request<_>| {
                 let matched_path = request
