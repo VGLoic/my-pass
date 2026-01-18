@@ -104,6 +104,8 @@ This project follows a domain-driven architecture that separates concerns across
 3. **Repository Layer** - Data persistence abstraction
 4. **Notifier Layer** - External notifications (e.g., email)
 
+The architecture follows the principles of the [Master hexagonal architecture in Rust](https://www.howtocodeit.com/guides/master-hexagonal-architecture-in-rust#top).
+
 ### Request Flow
 
 The typical request flow follows this pattern:
