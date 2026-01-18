@@ -56,6 +56,17 @@ async fn test_signup() {
             .status(),
         StatusCode::OK
     );
+
+    assert!(
+        instance_state
+            .accounts_notifier
+            .get_verified_tickets(&signup_body.email)
+            .iter()
+            .any(
+                |(account, ticket)| account.email.to_string() == signup_body.email.to_lowercase()
+                    && ticket.id == last_ticket.id
+            )
+    );
 }
 
 #[tokio::test]

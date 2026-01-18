@@ -18,14 +18,13 @@ use base64::{
 use fake::{Dummy, Fake, Faker};
 use serde::{Deserialize, Serialize};
 
-use crate::domains::accounts::{
+use crate::domains::accounts::models::{
     Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginError,
     LoginRequest, LoginRequestError, NewVerificationTicketError, NewVerificationTicketRequest,
     NewVerificationTicketRequestError, SignupRequest, SignupRequestError,
     UseVerificationTicketError, UseVerificationTicketRequest, UseVerificationTicketRequestError,
     VerificationTicket,
 };
-use tracing::info;
 
 pub fn accounts_router() -> Router<AppState> {
     Router::new()
@@ -44,7 +43,7 @@ async fn sign_up(
     State(app_state): State<AppState>,
     Json(body): Json<SignUpRequestHttpBody>,
 ) -> Result<StatusCode, ApiError> {
-    let signup_request = body.try_into_domain().map_err(|e| match e {
+    let request = body.try_into_domain().map_err(|e| match e {
         SignupRequestMappingError::EmailFormat(msg) => {
             ApiError::BadRequest(format!("invalid email format: {msg}"))
         }
@@ -71,9 +70,9 @@ async fn sign_up(
         },
     })?;
 
-    let (created_account, created_ticket) = app_state
-        .accounts_repository
-        .create_account(&signup_request)
+    let _ = app_state
+        .accounts_service
+        .signup(request)
         .await
         .map_err(|e| match e {
             CreateAccountError::EmailAlreadyCreated => {
@@ -81,13 +80,6 @@ async fn sign_up(
             }
             CreateAccountError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
-
-    app_state
-        .accounts_notifier
-        .account_signed_up(&created_account, &created_ticket)
-        .await;
-
-    info!("Account created with email: {}", created_account.email);
 
     Ok(StatusCode::CREATED)
 }
@@ -239,7 +231,7 @@ async fn use_verification_ticket(
         EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
     })?;
     let (account, ticket) = app_state
-        .accounts_repository
+        .accounts_service
         .find_account_and_last_verification_ticket_by_email(&email)
         .await
         .map_err(|e| match e {
@@ -250,42 +242,37 @@ async fn use_verification_ticket(
             FindLastVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
 
-    let use_verification_ticket_request =
-        body.try_into_domain(account, ticket).map_err(|e| match e {
-            UseVerificationTicketRequestMappingError::InvalidTokenFormat(_msg) => {
+    let request = body.try_into_domain(account, ticket).map_err(|e| match e {
+        UseVerificationTicketRequestMappingError::InvalidTokenFormat(_msg) => {
+            ApiError::BadRequest("Invalid verification ticket token".to_string())
+        }
+        UseVerificationTicketRequestMappingError::InvalidRequest(e) => match e {
+            UseVerificationTicketRequestError::AlreadyVerified => {
+                ApiError::BadRequest("Account is already verified".to_string())
+            }
+            UseVerificationTicketRequestError::AlreadyUsed => {
+                ApiError::BadRequest("Verification ticket has already been used".to_string())
+            }
+            UseVerificationTicketRequestError::Cancelled => {
+                ApiError::BadRequest("Verification ticket has been cancelled".to_string())
+            }
+            UseVerificationTicketRequestError::Expired => {
+                ApiError::BadRequest("Verification ticket has expired".to_string())
+            }
+            UseVerificationTicketRequestError::InvalidToken => {
                 ApiError::BadRequest("Invalid verification ticket token".to_string())
             }
-            UseVerificationTicketRequestMappingError::InvalidRequest(e) => match e {
-                UseVerificationTicketRequestError::AlreadyVerified => {
-                    ApiError::BadRequest("Account is already verified".to_string())
-                }
-                UseVerificationTicketRequestError::AlreadyUsed => {
-                    ApiError::BadRequest("Verification ticket has already been used".to_string())
-                }
-                UseVerificationTicketRequestError::Cancelled => {
-                    ApiError::BadRequest("Verification ticket has been cancelled".to_string())
-                }
-                UseVerificationTicketRequestError::Expired => {
-                    ApiError::BadRequest("Verification ticket has expired".to_string())
-                }
-                UseVerificationTicketRequestError::InvalidToken => {
-                    ApiError::BadRequest("Invalid verification ticket token".to_string())
-                }
-                UseVerificationTicketRequestError::Unknown(err) => {
-                    ApiError::InternalServerError(err)
-                }
-            },
-        })?;
+            UseVerificationTicketRequestError::Unknown(err) => ApiError::InternalServerError(err),
+        },
+    })?;
 
-    app_state
-        .accounts_repository
-        .verify_account(&use_verification_ticket_request)
+    let _ = app_state
+        .accounts_service
+        .use_verification_ticket(request)
         .await
         .map_err(|e| match e {
             UseVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
-
-    info!("Account with email {} verified", &email);
 
     Ok(StatusCode::OK)
 }
@@ -334,7 +321,7 @@ async fn new_verification_ticket(
         EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
     })?;
     let (account, last_verification_ticket) = match app_state
-        .accounts_repository
+        .accounts_service
         .find_account_and_last_verification_ticket_by_email(&email)
         .await
     {
@@ -373,19 +360,13 @@ async fn new_verification_ticket(
             },
         })?;
 
-    // Cancel existing ticket if any and create a new one
-    let verification_ticket = app_state
-        .accounts_repository
-        .create_new_verification_ticket(&domain_request)
+    let _ = app_state
+        .accounts_service
+        .create_new_verification_ticket(domain_request)
         .await
         .map_err(|e| match e {
             NewVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
-
-    app_state
-        .accounts_notifier
-        .new_verification_ticket_created(&account, &verification_ticket)
-        .await;
 
     Ok(StatusCode::CREATED)
 }
@@ -437,7 +418,7 @@ async fn login(
         EmailError::InvalidFormat => ApiError::BadRequest("Email format is invalid".to_string()),
     })?;
     let account = app_state
-        .accounts_repository
+        .accounts_service
         .find_account_by_email(&email)
         .await
         .map_err(|e| match e {
@@ -471,25 +452,16 @@ async fn login(
             },
         })?;
 
-    app_state
-        .accounts_repository
-        .record_login(account.id)
+    let access_token = login_request.access_token().clone();
+    let _ = app_state
+        .accounts_service
+        .login(login_request)
         .await
         .map_err(|e| match e {
             LoginError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
 
-    app_state
-        .accounts_notifier
-        .account_logged_in(&account)
-        .await;
-
-    Ok((
-        StatusCode::OK,
-        Json(LoginResponse {
-            access_token: login_request.access_token().clone(),
-        }),
-    ))
+    Ok((StatusCode::OK, Json(LoginResponse { access_token })))
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -538,7 +510,7 @@ async fn get_me(
     authorized_account: AuthorizedAccount,
 ) -> Result<Json<MeResponse>, ApiError> {
     let account = app_state
-        .accounts_repository
+        .accounts_service
         .find_account_by_id(authorized_account.account_id)
         .await
         .map_err(|e| match e {

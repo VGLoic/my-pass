@@ -12,7 +12,10 @@ use axum::{
 };
 use my_pass::{
     config::Config,
-    domains::accounts::{Account, VerificationTicket, notifier::AccountsNotifier},
+    domains::accounts::{
+        models::{Account, VerificationTicket},
+        notifier::AccountsNotifier,
+    },
     newtypes::Opaque,
     routes::app_router,
     secrets::{SecretKey, SecretsManager, SecretsManagerError},
@@ -95,13 +98,12 @@ pub async fn setup_instance(
     let accounts_repository =
         my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool);
     let accounts_notifier = FakeAccountsNotifier::new();
-
-    let app = app_router(
-        secrets_manager,
+    let accounts_service = my_pass::domains::accounts::service::DefaultAccountsService::new(
         accounts_repository,
         accounts_notifier.clone(),
-    )
-    .layer(
+    );
+
+    let app = app_router(secrets_manager, accounts_service).layer(
         TraceLayer::new_for_http()
             .make_span_with(|request: &Request<_>| {
                 let matched_path = request
@@ -179,6 +181,10 @@ impl SecretsManager for FakeSecretsManager {
 pub enum Notification {
     VerificationTicket(VerificationTicket),
     Login(Account),
+    AccountVerified {
+        account: Account,
+        ticket: VerificationTicket,
+    },
 }
 
 /// Fake accounts notifier for tests
@@ -203,6 +209,18 @@ impl FakeAccountsNotifier {
             .get(&lowercase_email)
             .cloned()
             .unwrap_or_default()
+    }
+
+    #[allow(dead_code)]
+    pub fn get_verified_tickets(&self, email: &str) -> Vec<(Account, VerificationTicket)> {
+        let notifications = self.get_account_notifications(email);
+        notifications
+            .into_iter()
+            .filter_map(|notification| match notification {
+                Notification::AccountVerified { account, ticket } => Some((account, ticket)),
+                _ => None,
+            })
+            .collect()
     }
 
     #[allow(dead_code)]
@@ -238,6 +256,17 @@ impl AccountsNotifier for FakeAccountsNotifier {
             .entry(account.email.to_string().to_lowercase())
             .or_default()
             .push(Notification::VerificationTicket(ticket.clone()));
+    }
+
+    async fn account_verified(&self, account: &Account, ticket: &VerificationTicket) {
+        let mut notifications = self.notifications.lock().unwrap();
+        notifications
+            .entry(account.email.to_string().to_lowercase())
+            .or_default()
+            .push(Notification::AccountVerified {
+                account: account.clone(),
+                ticket: ticket.clone(),
+            });
     }
 
     async fn account_logged_in(&self, account: &Account) {

@@ -1,6 +1,6 @@
 use tracing::info;
 
-use super::{Account, VerificationTicket};
+use super::models::{Account, VerificationTicket};
 
 /// Defines the AccountsNotifier trait for account-related notifications.
 #[async_trait::async_trait]
@@ -11,6 +11,12 @@ pub trait AccountsNotifier: Send + Sync + 'static {
     /// * `account` - A reference to the [Account] that has been signed up
     /// * `verification_ticket` - A reference to the associated [VerificationTicket]
     async fn account_signed_up(&self, account: &Account, verification_ticket: &VerificationTicket);
+
+    /// Triggers a notification when an account has been verified.
+    /// # Arguments
+    /// * `account` - A reference to the [Account] that has been verified
+    /// * `verification_ticket` - A reference to the associated [VerificationTicket]
+    async fn account_verified(&self, account: &Account, verification_ticket: &VerificationTicket);
 
     /// Triggers a notification when an account has logged in.
     /// # Arguments
@@ -28,6 +34,7 @@ pub trait AccountsNotifier: Send + Sync + 'static {
     );
 }
 
+#[derive(Clone)]
 pub struct DummyAccountsNotifier;
 
 #[async_trait::async_trait]
@@ -37,6 +44,16 @@ impl AccountsNotifier for DummyAccountsNotifier {
         // We log the event for demonstration purposes, this is not safe for production use
         info!(
             "Triggered account_signed_up notification for email \"{}\" with ticket \"{}\"",
+            account.email,
+            verification_ticket.token.unsafe_inner()
+        );
+    }
+
+    async fn account_verified(&self, account: &Account, verification_ticket: &VerificationTicket) {
+        // No-op
+        // We log the event for demonstration purposes, this is not safe for production use
+        info!(
+            "Triggered account_verified notification for email \"{}\" with ticket \"{}\"",
             account.email,
             verification_ticket.token.unsafe_inner()
         );
@@ -59,7 +76,7 @@ impl AccountsNotifier for DummyAccountsNotifier {
         // No-op
         // We log the event for demonstration purposes, this is not safe for production use
         info!(
-            "Triggered new_verification_ticket_created notification for email \"{}\" with ticket \"{}\"",
+            "Triggered new_verification_ticket_created notification for account email \"{}\" with ticket \"{}\"",
             account.email,
             verification_ticket.token.unsafe_inner()
         );
