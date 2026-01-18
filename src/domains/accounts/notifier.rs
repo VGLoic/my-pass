@@ -28,6 +28,7 @@ pub trait AccountsNotifier: Send + Sync + 'static {
     );
 }
 
+#[derive(Clone)]
 pub struct DummyAccountsNotifier;
 
 #[async_trait::async_trait]

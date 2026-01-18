@@ -44,7 +44,7 @@ async fn sign_up(
     State(app_state): State<AppState>,
     Json(body): Json<SignUpRequestHttpBody>,
 ) -> Result<StatusCode, ApiError> {
-    let signup_request = body.try_into_domain().map_err(|e| match e {
+    let request = body.try_into_domain().map_err(|e| match e {
         SignupRequestMappingError::EmailFormat(msg) => {
             ApiError::BadRequest(format!("invalid email format: {msg}"))
         }
@@ -71,9 +71,9 @@ async fn sign_up(
         },
     })?;
 
-    let (created_account, created_ticket) = app_state
-        .accounts_repository
-        .create_account(&signup_request)
+    let _ = app_state
+        .accounts_service
+        .signup(request)
         .await
         .map_err(|e| match e {
             CreateAccountError::EmailAlreadyCreated => {
@@ -81,13 +81,6 @@ async fn sign_up(
             }
             CreateAccountError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
-
-    app_state
-        .accounts_notifier
-        .account_signed_up(&created_account, &created_ticket)
-        .await;
-
-    info!("Account created with email: {}", created_account.email);
 
     Ok(StatusCode::CREATED)
 }
