@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use sqlx::{Pool, Postgres, Row, query, query_as};
 
-use super::{
+use super::models::{
     Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginError,
     NewVerificationTicketError, NewVerificationTicketRequest, SignupRequest,
     UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
@@ -149,12 +149,12 @@ impl AccountsRepository for PsqlAccountsRepository {
                 updated_at
         "#,
         )
-        .bind(&signup_request.email)
-        .bind(&signup_request.password_hash)
-        .bind(signup_request.encrypted_key_pair.symmetric_key_salt())
-        .bind(signup_request.encrypted_key_pair.encryption_nonce())
-        .bind(signup_request.encrypted_key_pair.ciphertext())
-        .bind(signup_request.encrypted_key_pair.public_key())
+        .bind(signup_request.email())
+        .bind(signup_request.password_hash())
+        .bind(signup_request.encrypted_key_pair().symmetric_key_salt())
+        .bind(signup_request.encrypted_key_pair().encryption_nonce())
+        .bind(signup_request.encrypted_key_pair().ciphertext())
+        .bind(signup_request.encrypted_key_pair().public_key())
         .fetch_one(&mut *transaction)
         .await
         .map_err(|e| {
@@ -189,8 +189,8 @@ impl AccountsRepository for PsqlAccountsRepository {
         "#,
         )
         .bind(account.id)
-        .bind(&signup_request.verification_ticket_token)
-        .bind(signup_request.verification_ticket_expires_at)
+        .bind(signup_request.verification_ticket_token())
+        .bind(signup_request.verification_ticket_expires_at())
         .fetch_one(&mut *transaction)
         .await
         .map_err(|e| anyhow!(e).context("failed to create verification ticket"))?;
@@ -213,7 +213,7 @@ impl AccountsRepository for PsqlAccountsRepository {
             .await
             .map_err(|e| anyhow!(e).context("failed to start transaction"))?;
 
-        if let Some(ticket_id_to_cancel) = new_verification_ticket_request.ticket_id_to_cancel {
+        if let Some(ticket_id_to_cancel) = new_verification_ticket_request.ticket_id_to_cancel() {
             // Cancel existing active ticket
             let update_result = query(
                 r#"
@@ -223,7 +223,7 @@ impl AccountsRepository for PsqlAccountsRepository {
             "#,
             )
             .bind(ticket_id_to_cancel)
-            .bind(new_verification_ticket_request.account_id)
+            .bind(new_verification_ticket_request.account_id())
             .execute(&mut *transaction)
             .await
             .map_err(|e| anyhow!(e).context("failed to cancel existing verification tickets"))?;
@@ -255,9 +255,9 @@ impl AccountsRepository for PsqlAccountsRepository {
                 updated_at
         "#,
         )
-        .bind(new_verification_ticket_request.account_id)
-        .bind(&new_verification_ticket_request.verification_ticket_token)
-        .bind(new_verification_ticket_request.verification_ticket_expires_at)
+        .bind(new_verification_ticket_request.account_id())
+        .bind(new_verification_ticket_request.verification_ticket_token())
+        .bind(new_verification_ticket_request.verification_ticket_expires_at())
         .fetch_one(&mut *transaction)
         .await
         .map_err(|e| anyhow!(e).context("failed to create new verification ticket"))?;
@@ -480,7 +480,7 @@ impl AccountsRepository for PsqlAccountsRepository {
             WHERE id = $1 AND verified = FALSE
         "#,
         )
-        .bind(request.account_id)
+        .bind(request.account_id())
         .execute(&mut *transaction)
         .await
         .map_err(|e| anyhow!(e).context("failed to verify account"))?;
@@ -499,8 +499,8 @@ impl AccountsRepository for PsqlAccountsRepository {
             WHERE id = $1 AND account_id = $2 AND used_at IS NULL AND cancelled_at IS NULL
         "#,
         )
-        .bind(request.valid_ticket_id)
-        .bind(request.account_id)
+        .bind(request.valid_ticket_id())
+        .bind(request.account_id())
         .execute(&mut *transaction)
         .await
         .map_err(|e| anyhow!(e).context("failed to mark verification ticket as used"))?;

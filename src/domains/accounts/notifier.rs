@@ -1,6 +1,6 @@
 use tracing::info;
 
-use super::{Account, VerificationTicket};
+use super::models::{Account, VerificationTicket};
 
 /// Defines the AccountsNotifier trait for account-related notifications.
 #[async_trait::async_trait]

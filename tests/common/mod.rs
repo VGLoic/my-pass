@@ -12,7 +12,10 @@ use axum::{
 };
 use my_pass::{
     config::Config,
-    domains::accounts::{Account, VerificationTicket, notifier::AccountsNotifier},
+    domains::accounts::{
+        models::{Account, VerificationTicket},
+        notifier::AccountsNotifier,
+    },
     newtypes::Opaque,
     routes::app_router,
     secrets::{SecretKey, SecretsManager, SecretsManagerError},

@@ -18,7 +18,7 @@ use base64::{
 use fake::{Dummy, Fake, Faker};
 use serde::{Deserialize, Serialize};
 
-use crate::domains::accounts::{
+use crate::domains::accounts::models::{
     Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginError,
     LoginRequest, LoginRequestError, NewVerificationTicketError, NewVerificationTicketRequest,
     NewVerificationTicketRequestError, SignupRequest, SignupRequestError,

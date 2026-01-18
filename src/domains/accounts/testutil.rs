@@ -1,5 +1,5 @@
 #[cfg(test)]
-use super::*;
+use super::models::*;
 #[cfg(test)]
 use base64::prelude::BASE64_URL_SAFE;
 #[cfg(test)]
@@ -9,6 +9,11 @@ use fake::{Fake, Faker};
 /// The account is unverified by default with a randomly generated password hash.
 #[cfg(test)]
 pub fn fake_account() -> Account {
+    use crate::{
+        crypto::password::PasswordOps,
+        newtypes::{Opaque, Password},
+    };
+
     let password = Faker.fake::<Password>();
     Account {
         id: uuid::Uuid::new_v4(),
@@ -29,6 +34,10 @@ pub fn fake_account() -> Account {
 /// The ticket is active (not used, not cancelled) and expires in 15 minutes.
 #[cfg(test)]
 pub fn fake_verification_ticket(account_id: uuid::Uuid) -> VerificationTicket {
+    use base64::Engine;
+
+    use crate::newtypes::Opaque;
+
     VerificationTicket {
         id: uuid::Uuid::new_v4(),
         account_id,
