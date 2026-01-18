@@ -54,8 +54,8 @@ pub trait AccountsService: Send + Sync + 'static {
     /// # Arguments
     /// * `request` - The [LoginRequest] containing login details.
     /// # Errors
-    /// Returns [LoginRequestError] if login fails.
-    /// * [LoginRequestError::Unknown] - If an unknown error occurs during login.
+    /// Returns [LoginError] if login fails.
+    /// * [LoginError::Unknown] - If an unknown error occurs during login.
     async fn login(&self, request: LoginRequest) -> Result<Account, LoginError>;
 
     /// Retrieves an [Account] by its email.
