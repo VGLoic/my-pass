@@ -99,18 +99,12 @@ async fn main() -> Result<(), anyhow::Error> {
     let accounts_notifier = my_pass::domains::accounts::notifier::DummyAccountsNotifier;
     let accounts_service = my_pass::domains::accounts::service::DefaultAccountsService::new(
         accounts_repository.clone(),
-        accounts_notifier.clone(),
+        accounts_notifier,
     );
 
     let x_request_id = HeaderName::from_static(REQUEST_ID_HEADER);
 
-    let app = app_router(
-        secrets_manager,
-        accounts_repository,
-        accounts_notifier,
-        accounts_service,
-    )
-    .layer((
+    let app = app_router(secrets_manager, accounts_repository, accounts_service).layer((
         // Set `x-request-id` header for every request
         SetRequestIdLayer::new(x_request_id.clone(), MakeRequestUuid),
         // Log request and response

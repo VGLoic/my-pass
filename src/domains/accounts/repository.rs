@@ -3,7 +3,7 @@ use sqlx::{Pool, Postgres, Row, query, query_as};
 
 use super::models::{
     Account, CreateAccountError, FindAccountError, FindLastVerificationTicketError, LoginError,
-    NewVerificationTicketError, NewVerificationTicketRequest, SignupRequest,
+    LoginRequest, NewVerificationTicketError, NewVerificationTicketRequest, SignupRequest,
     UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
 };
 use crate::newtypes::Email;
@@ -95,12 +95,12 @@ pub trait AccountsRepository: Send + Sync + 'static {
 
     /// Records a login event for the specified account.
     /// # Arguments
-    /// * `account_id` - The UUID of the account that has logged in.
+    /// * `request` - The [LoginRequest] containing login details.
     /// # Returns
-    /// * `()` - Indicates successful recording of the login event.
+    /// * `Account` - The logged-in [Account].
     /// # Errors
     /// - MUST return [LoginError::Unknown] for any errors encountered during the login recording process.
-    async fn record_login(&self, account_id: uuid::Uuid) -> Result<(), LoginError>;
+    async fn record_login(&self, request: &LoginRequest) -> Result<Account, LoginError>;
 }
 
 #[derive(Clone)]
@@ -555,25 +555,31 @@ impl AccountsRepository for PsqlAccountsRepository {
         Ok((updated_account, updated_ticket))
     }
 
-    async fn record_login(&self, account_id: uuid::Uuid) -> Result<(), LoginError> {
-        let result = query(
+    async fn record_login(&self, request: &LoginRequest) -> Result<Account, LoginError> {
+        let result = query_as::<_, Account>(
             r#"
             UPDATE account
             SET last_login_at = NOW()
             WHERE id = $1
+            RETURNING
+                id,
+                email,
+                password_hash,
+                verified,
+                private_key_symmetric_key_salt,
+                private_key_encryption_nonce,
+                private_key_ciphertext,
+                public_key,
+                last_login_at,
+                created_at,
+                updated_at
         "#,
         )
-        .bind(account_id)
-        .execute(&self.pool)
+        .bind(request.account_id())
+        .fetch_one(&self.pool)
         .await
         .map_err(|e| anyhow!(e).context("failed to register account login"))?;
 
-        if result.rows_affected() != 1 {
-            return Err(anyhow!("no rows updated")
-                .context("account not found when registering login")
-                .into());
-        }
-
-        Ok(())
+        Ok(result)
     }
 }

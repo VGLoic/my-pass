@@ -1,6 +1,7 @@
 use super::models::{
-    Account, CreateAccountError, NewVerificationTicketError, NewVerificationTicketRequest,
-    SignupRequest, UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
+    Account, CreateAccountError, LoginError, LoginRequest, NewVerificationTicketError,
+    NewVerificationTicketRequest, SignupRequest, UseVerificationTicketError,
+    UseVerificationTicketRequest, VerificationTicket,
 };
 use super::notifier::AccountsNotifier;
 use super::repository::AccountsRepository;
@@ -45,6 +46,15 @@ pub trait AccountsService: Send + Sync + 'static {
         &self,
         request: NewVerificationTicketRequest,
     ) -> Result<(Account, VerificationTicket), NewVerificationTicketError>;
+
+    /// Logs in an account with the given login request.
+    /// Returns the logged-in [Account] on success.
+    /// # Arguments
+    /// * `request` - The [LoginRequest] containing login details.
+    /// # Errors
+    /// Returns [LoginRequestError] if login fails.
+    /// * [LoginRequestError::Unknown] - If an unknown error occurs during login.
+    async fn login(&self, request: LoginRequest) -> Result<Account, LoginError>;
 }
 
 pub struct DefaultAccountsService<Repository: AccountsRepository, Notifier: AccountsNotifier> {
@@ -118,5 +128,15 @@ where
         );
 
         Ok((account, verification_ticket))
+    }
+
+    async fn login(&self, request: LoginRequest) -> Result<Account, LoginError> {
+        let account = self.repository.record_login(&request).await?;
+
+        self.notifier.account_logged_in(&account).await;
+
+        info!("Account logged in with email: {}", &account.email);
+
+        Ok(account)
     }
 }

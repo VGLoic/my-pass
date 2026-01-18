@@ -452,25 +452,16 @@ async fn login(
             },
         })?;
 
-    app_state
-        .accounts_repository
-        .record_login(account.id)
+    let access_token = login_request.access_token().clone();
+    let _ = app_state
+        .accounts_service
+        .login(login_request)
         .await
         .map_err(|e| match e {
             LoginError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
 
-    app_state
-        .accounts_notifier
-        .account_logged_in(&account)
-        .await;
-
-    Ok((
-        StatusCode::OK,
-        Json(LoginResponse {
-            access_token: login_request.access_token().clone(),
-        }),
-    ))
+    Ok((StatusCode::OK, Json(LoginResponse { access_token })))
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

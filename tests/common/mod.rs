@@ -103,13 +103,7 @@ pub async fn setup_instance(
         accounts_notifier.clone(),
     );
 
-    let app = app_router(
-        secrets_manager,
-        accounts_repository,
-        accounts_notifier.clone(),
-        accounts_service,
-    )
-    .layer(
+    let app = app_router(secrets_manager, accounts_repository, accounts_service).layer(
         TraceLayer::new_for_http()
             .make_span_with(|request: &Request<_>| {
                 let matched_path = request
