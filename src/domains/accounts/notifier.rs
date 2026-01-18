@@ -76,7 +76,7 @@ impl AccountsNotifier for DummyAccountsNotifier {
         // No-op
         // We log the event for demonstration purposes, this is not safe for production use
         info!(
-            "Triggered new_verification_ticket_created notification for email \"{}\" with ticket \"{}\"",
+            "Triggered new_verification_ticket_created notification for account email \"{}\" with ticket \"{}\"",
             account.email,
             verification_ticket.token.unsafe_inner()
         );

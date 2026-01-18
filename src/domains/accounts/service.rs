@@ -1,6 +1,6 @@
 use super::models::{
-    Account, CreateAccountError, SignupRequest, UseVerificationTicketError,
-    UseVerificationTicketRequest, VerificationTicket,
+    Account, CreateAccountError, NewVerificationTicketError, NewVerificationTicketRequest,
+    SignupRequest, UseVerificationTicketError, UseVerificationTicketRequest, VerificationTicket,
 };
 use super::notifier::AccountsNotifier;
 use super::repository::AccountsRepository;
@@ -33,6 +33,18 @@ pub trait AccountsService: Send + Sync + 'static {
         &self,
         request: UseVerificationTicketRequest,
     ) -> Result<(Account, VerificationTicket), UseVerificationTicketError>;
+
+    /// Creates a new verification ticket for an account.
+    /// Returns the [Account] and created [VerificationTicket] on success.
+    /// # Arguments
+    /// * `request` - The [NewVerificationTicketRequest] containing account details.
+    /// # Errors
+    /// Returns [NewVerificationTicketError] if ticket creation fails.
+    /// * [NewVerificationTicketError::Unknown] - If an unknown error occurs during ticket creation.
+    async fn create_new_verification_ticket(
+        &self,
+        request: NewVerificationTicketRequest,
+    ) -> Result<(Account, VerificationTicket), NewVerificationTicketError>;
 }
 
 pub struct DefaultAccountsService<Repository: AccountsRepository, Notifier: AccountsNotifier> {
@@ -85,5 +97,26 @@ where
         info!("Account with email {} verified", &updated_account.email);
 
         Ok((updated_account, updated_ticket))
+    }
+
+    async fn create_new_verification_ticket(
+        &self,
+        request: NewVerificationTicketRequest,
+    ) -> Result<(Account, VerificationTicket), NewVerificationTicketError> {
+        let (account, verification_ticket) = self
+            .repository
+            .create_new_verification_ticket(&request)
+            .await?;
+
+        self.notifier
+            .new_verification_ticket_created(&account, &verification_ticket)
+            .await;
+
+        info!(
+            "New verification ticket created for account email: {}",
+            &account.email
+        );
+
+        Ok((account, verification_ticket))
     }
 }

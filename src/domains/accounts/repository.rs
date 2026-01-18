@@ -33,13 +33,14 @@ pub trait AccountsRepository: Send + Sync + 'static {
     /// # Arguments
     /// * `new_verification_ticket_request` - A reference to the [NewVerificationTicketRequest] containing details for the new ticket.
     /// # Returns
+    /// * `Account` - The non-verified [Account] for which the ticket was created.
     /// * `VerificationTicket` - The created [VerificationTicket].
     /// # Errors
     /// - MUST return [CreateAccountError::Unknown] for any errors encountered during ticket creation
     async fn create_new_verification_ticket(
         &self,
         new_verification_ticket_request: &NewVerificationTicketRequest,
-    ) -> Result<VerificationTicket, NewVerificationTicketError>;
+    ) -> Result<(Account, VerificationTicket), NewVerificationTicketError>;
 
     /// Retrieves an [Account] by its email.
     ///
@@ -206,12 +207,36 @@ impl AccountsRepository for PsqlAccountsRepository {
     async fn create_new_verification_ticket(
         &self,
         new_verification_ticket_request: &NewVerificationTicketRequest,
-    ) -> Result<VerificationTicket, NewVerificationTicketError> {
+    ) -> Result<(Account, VerificationTicket), NewVerificationTicketError> {
         let mut transaction = self
             .pool
             .begin()
             .await
             .map_err(|e| anyhow!(e).context("failed to start transaction"))?;
+
+        // Account must not have been verified
+        let non_verified_account = query_as::<_, Account>(
+            r#"
+            SELECT
+                id,
+                email,
+                password_hash,
+                verified,
+                private_key_symmetric_key_salt,
+                private_key_encryption_nonce,
+                private_key_ciphertext,
+                public_key,
+                last_login_at,
+                created_at,
+                updated_at
+            FROM account
+            WHERE id = $1 AND verified = FALSE
+        "#,
+        )
+        .bind(new_verification_ticket_request.account_id())
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|e| anyhow!(e).context("failed to find non-verified account"))?;
 
         if let Some(ticket_id_to_cancel) = new_verification_ticket_request.ticket_id_to_cancel() {
             // Cancel existing active ticket
@@ -267,7 +292,7 @@ impl AccountsRepository for PsqlAccountsRepository {
             .await
             .map_err(|e| anyhow!(e).context("failed to commit transaction"))?;
 
-        Ok(verification_ticket)
+        Ok((non_verified_account, verification_ticket))
     }
 
     async fn find_account_by_email(&self, email: &Email) -> Result<Account, FindAccountError> {

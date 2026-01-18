@@ -360,19 +360,13 @@ async fn new_verification_ticket(
             },
         })?;
 
-    // Cancel existing ticket if any and create a new one
-    let verification_ticket = app_state
-        .accounts_repository
-        .create_new_verification_ticket(&domain_request)
+    let _ = app_state
+        .accounts_service
+        .create_new_verification_ticket(domain_request)
         .await
         .map_err(|e| match e {
             NewVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
-
-    app_state
-        .accounts_notifier
-        .new_verification_ticket_created(&account, &verification_ticket)
-        .await;
 
     Ok(StatusCode::CREATED)
 }
