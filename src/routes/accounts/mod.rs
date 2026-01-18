@@ -25,7 +25,6 @@ use crate::domains::accounts::models::{
     UseVerificationTicketError, UseVerificationTicketRequest, UseVerificationTicketRequestError,
     VerificationTicket,
 };
-use tracing::info;
 
 pub fn accounts_router() -> Router<AppState> {
     Router::new()
@@ -243,42 +242,37 @@ async fn use_verification_ticket(
             FindLastVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
 
-    let use_verification_ticket_request =
-        body.try_into_domain(account, ticket).map_err(|e| match e {
-            UseVerificationTicketRequestMappingError::InvalidTokenFormat(_msg) => {
+    let request = body.try_into_domain(account, ticket).map_err(|e| match e {
+        UseVerificationTicketRequestMappingError::InvalidTokenFormat(_msg) => {
+            ApiError::BadRequest("Invalid verification ticket token".to_string())
+        }
+        UseVerificationTicketRequestMappingError::InvalidRequest(e) => match e {
+            UseVerificationTicketRequestError::AlreadyVerified => {
+                ApiError::BadRequest("Account is already verified".to_string())
+            }
+            UseVerificationTicketRequestError::AlreadyUsed => {
+                ApiError::BadRequest("Verification ticket has already been used".to_string())
+            }
+            UseVerificationTicketRequestError::Cancelled => {
+                ApiError::BadRequest("Verification ticket has been cancelled".to_string())
+            }
+            UseVerificationTicketRequestError::Expired => {
+                ApiError::BadRequest("Verification ticket has expired".to_string())
+            }
+            UseVerificationTicketRequestError::InvalidToken => {
                 ApiError::BadRequest("Invalid verification ticket token".to_string())
             }
-            UseVerificationTicketRequestMappingError::InvalidRequest(e) => match e {
-                UseVerificationTicketRequestError::AlreadyVerified => {
-                    ApiError::BadRequest("Account is already verified".to_string())
-                }
-                UseVerificationTicketRequestError::AlreadyUsed => {
-                    ApiError::BadRequest("Verification ticket has already been used".to_string())
-                }
-                UseVerificationTicketRequestError::Cancelled => {
-                    ApiError::BadRequest("Verification ticket has been cancelled".to_string())
-                }
-                UseVerificationTicketRequestError::Expired => {
-                    ApiError::BadRequest("Verification ticket has expired".to_string())
-                }
-                UseVerificationTicketRequestError::InvalidToken => {
-                    ApiError::BadRequest("Invalid verification ticket token".to_string())
-                }
-                UseVerificationTicketRequestError::Unknown(err) => {
-                    ApiError::InternalServerError(err)
-                }
-            },
-        })?;
+            UseVerificationTicketRequestError::Unknown(err) => ApiError::InternalServerError(err),
+        },
+    })?;
 
-    app_state
-        .accounts_repository
-        .verify_account(&use_verification_ticket_request)
+    let _ = app_state
+        .accounts_service
+        .use_verification_ticket(request)
         .await
         .map_err(|e| match e {
             UseVerificationTicketError::Unknown(err) => ApiError::InternalServerError(err),
         })?;
-
-    info!("Account with email {} verified", &email);
 
     Ok(StatusCode::OK)
 }

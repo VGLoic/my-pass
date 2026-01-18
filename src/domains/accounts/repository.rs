@@ -90,7 +90,7 @@ pub trait AccountsRepository: Send + Sync + 'static {
     async fn verify_account(
         &self,
         request: &UseVerificationTicketRequest,
-    ) -> Result<(), UseVerificationTicketError>;
+    ) -> Result<(Account, VerificationTicket), UseVerificationTicketError>;
 
     /// Records a login event for the specified account.
     /// # Arguments
@@ -464,7 +464,7 @@ impl AccountsRepository for PsqlAccountsRepository {
     async fn verify_account(
         &self,
         request: &UseVerificationTicketRequest,
-    ) -> Result<(), UseVerificationTicketError> {
+    ) -> Result<(Account, VerificationTicket), UseVerificationTicketError> {
         let mut transaction = self
             .pool
             .begin()
@@ -472,51 +472,62 @@ impl AccountsRepository for PsqlAccountsRepository {
             .map_err(|e| anyhow!(e).context("failed to start transaction"))?;
 
         // Mark the account as verified
-        // We only update the account if it is not already verified, we verify that the number of affected rows is 1
-        let updated_row = query(
+        // We only update the account if it is not already verified
+        let updated_account = query_as::<_, Account>(
             r#"
             UPDATE account
             SET verified = TRUE
             WHERE id = $1 AND verified = FALSE
+            RETURNING
+                id,
+                email,
+                password_hash,
+                verified,
+                private_key_symmetric_key_salt,
+                private_key_encryption_nonce,
+                private_key_ciphertext,
+                public_key,
+                last_login_at,
+                created_at,
+                updated_at
         "#,
         )
         .bind(request.account_id())
-        .execute(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await
         .map_err(|e| anyhow!(e).context("failed to verify account"))?;
-        if updated_row.rows_affected() != 1 {
-            return Err(anyhow!("no rows updated")
-                .context("account is already verified")
-                .into());
-        }
 
         // Mark the verification ticket as used
-        // We only update the ticket if it is unused and not cancelled, we verify that the number of affected rows is 1
-        let updated_row = query(
+        // We only update the ticket if it is unused and not cancelled
+        let updated_ticket = query_as::<_, VerificationTicket>(
             r#"
             UPDATE verification_ticket
             SET used_at = NOW()
             WHERE id = $1 AND account_id = $2 AND used_at IS NULL AND cancelled_at IS NULL
+            RETURNING
+                id,
+                account_id,
+                token,
+                expires_at,
+                created_at,
+                expires_at,
+                cancelled_at,
+                used_at,
+                updated_at
         "#,
         )
         .bind(request.valid_ticket_id())
         .bind(request.account_id())
-        .execute(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await
         .map_err(|e| anyhow!(e).context("failed to mark verification ticket as used"))?;
-
-        if updated_row.rows_affected() != 1 {
-            return Err(anyhow!("no rows updated")
-                .context("verification ticket was already used or cancelled")
-                .into());
-        }
 
         transaction
             .commit()
             .await
             .map_err(|e| anyhow!(e).context("failed to commit transaction"))?;
 
-        Ok(())
+        Ok((updated_account, updated_ticket))
     }
 
     async fn record_login(&self, account_id: uuid::Uuid) -> Result<(), LoginError> {
