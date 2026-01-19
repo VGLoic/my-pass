@@ -39,6 +39,22 @@ scripts/integration-test.sh
 - Use `anyhow` error for simple and local cases
 - Use error enums for broader error handling across modules, with an `Unknown` variant as an `anyhow` error wrapper for unexpected cases
 
+### Logging Standards
+- Log entry and exit of sensitive operations (authentication, crypto, data access)
+- Use appropriate log levels: `error` for failures, `warn` for suspicious activity, `info` for important events, `debug` for detailed tracing
+- **Never log passwords, secrets, tokens, or private keys**
+- Include context in logs (user IDs, operation types) but sanitize sensitive data
+- Log all security-relevant events (login attempts, verification failures, access denials)
+
+### Security Guidelines
+- Validate all user inputs before processing
+- Never store or log credentials, secrets, or sensitive tokens
+- Use secure defaults for all cryptographic operations
+- Ensure sensitive data in memory is properly handled (consider clearing after use)
+- Implement proper access control for all endpoints and operations
+- Follow the principle of least privilege - grant minimum necessary permissions
+- Regularly review and audit security-sensitive code paths
+
 ## Before Submitting Changes
 1. Ensure code follows domain-driven design principles
 2. Run `cargo fmt` to format the code
