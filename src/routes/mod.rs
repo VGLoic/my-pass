@@ -18,6 +18,7 @@ use crate::{
 };
 
 pub mod accounts;
+pub mod items;
 
 pub fn app_router(
     secrets_manager: impl SecretsManager,
@@ -30,6 +31,7 @@ pub fn app_router(
     Router::new()
         .route("/health", get(get_healthcheck))
         .nest("/api/accounts", accounts::accounts_router())
+        .nest("/api/items", items::items_router())
         .fallback(not_found)
         .with_state(app_state)
 }
