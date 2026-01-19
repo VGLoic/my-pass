@@ -1,28 +1,21 @@
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
-use axum::{
-    body::Body,
-    extract::MatchedPath,
-    http::{Request, Response},
-};
 use my_pass::{
     config::Config,
     domains::accounts::{
         models::{Account, VerificationTicket},
         notifier::AccountsNotifier,
     },
+    httpserver::serve_http_server,
     newtypes::Opaque,
-    routes::app_router,
     secrets::{SecretKey, SecretsManager, SecretsManagerError},
 };
 use sqlx::postgres::PgPoolOptions;
-use tower_http::trace::TraceLayer;
-use tracing::{Level, Span, error, info, info_span, level_filters::LevelFilter};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tracing::{Level, error, level_filters::LevelFilter};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[allow(dead_code)]
@@ -103,31 +96,6 @@ pub async fn setup_instance(
         accounts_notifier.clone(),
     );
 
-    let app = app_router(secrets_manager, accounts_service).layer(
-        TraceLayer::new_for_http()
-            .make_span_with(|request: &Request<_>| {
-                let matched_path = request
-                    .extensions()
-                    .get::<MatchedPath>()
-                    .map(MatchedPath::as_str);
-
-                info_span!(
-                    "http_request",
-                    method = ?request.method(),
-                    matched_path,
-                )
-            })
-            .on_response(
-                |response: &Response<Body>, latency: Duration, _span: &Span| {
-                    if response.status().is_server_error() {
-                        error!("response: {} {latency:?}", response.status())
-                    } else {
-                        info!("response: {} {latency:?}", response.status())
-                    }
-                },
-            ),
-    );
-
     let listener = if config.port == 0 {
         bind_listener_to_free_port().await?
     } else {
@@ -137,15 +105,20 @@ pub async fn setup_instance(
         })?
     };
 
-    let addr = listener.local_addr().unwrap();
+    let server_url = format!(
+        "http://{}:{}",
+        listener.local_addr().unwrap().ip(),
+        listener.local_addr().unwrap().port()
+    );
 
-    info!("Successfully bound the TCP listener to address {addr}\n");
-
-    // Start a server, the handle is kept in order to abort it if needed
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::spawn(async move {
+        serve_http_server(listener, secrets_manager, accounts_service)
+            .await
+            .unwrap()
+    });
 
     Ok(InstanceState {
-        server_url: format!("http://{}:{}", addr.ip(), addr.port()),
+        server_url,
         reqwest_client: reqwest::Client::new(),
         accounts_notifier,
     })
