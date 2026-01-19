@@ -195,16 +195,13 @@ Handler logic:
 **Client Side:**
 - The user must be logged in,
 - The client encrypts the item data before sending it to the server:
-    1. Derives a shared using X25519 key exchange between an ephemeral key pair and the user's public key:
-        1. Generates a random Ed25519 secret key,
-        2. Generates the corresponding ephemeral public key,
-        3. Computes the shared key as: shared key = secret * user's public key,
-    2. Hashes the shared key `x` coordinate using SHA3-256,
-    3. Generates a random key derivation salt,
-    4. Uses Argon2id to derive a symmetric key from the hashed shared key and the salt,
-    5. Symmetrically encrypts the item data using AES-256-GCM with the derived symmetric key,
-- The client signes the ciphertext using the Ed25519 secret key,
-- The client sends the signature, the cyphertext, ephemeral public key and key derivation salt to the server using the endpoint described below.
+    1. Generates a random symmetric encryption key for the item,
+    2. Generates a random nonce for AES-256-GCM,
+    3. Symmetrically encrypts the item data using AES-256-GCM with the generated symmetric key and nonce, result is `ciphertext`,
+    4. Derives the user's public key from the user's Ed25519 key pair stored on the client,
+    5. Encrypts the symmetric encryption key using Ed25519 asymmetric encryption with the user's public key, result is `encryptedSymmetricKey`.
+    6. Signs the ciphertext using the Ed25519 secret key, result is `signature`,
+- The client sends the signature, the ciphertext, the nonce and the encrypted symmetric key to the server using the endpoint described below.
 
 **Server Side:**
 Endpoint: `POST /api/accounts/items` with Authorization header and request body:
@@ -212,8 +209,8 @@ Endpoint: `POST /api/accounts/items` with Authorization header and request body:
 ```json
 {
   "ciphertext": "<item_ciphertext>",
-  "ephemeralPublicKey": "<ephemeral_public_key>",
-  "keyDerivationSalt": "<key_derivation_salt>",
+  "encryptionNonce": "<item_encryption_nonce>",
+  "encryptedSymmetricKey": "<item_encrypted_symmetric_key>",
   "signature": "<item_signature>"
 }
 ```
@@ -221,7 +218,6 @@ Endpoint: `POST /api/accounts/items` with Authorization header and request body:
 Handler logic:
 1. Validate the JWT access token,
 2. Retrieve the account associated with the token from the database,
-3. Validate the ciphertext, ephemeral public key and key derivation salt format,
-3. Validate the signature using the account public key,
-4. Store in database:
-    - the item with ciphertext, ephemeral public key, key derivation salt, associated with the account.
+3. Validate the ciphertext, encryption nonce, encrypted symmetric key and signature format,
+4. Verify the signature of the ciphertext using the user's public key,
+5. Store in database the new item associated with the user's account containing the ciphertext, encryption nonce, and encrypted symmetric key.
