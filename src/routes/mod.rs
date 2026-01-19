@@ -13,7 +13,7 @@ use tracing::{error, warn};
 
 use crate::{
     crypto::jwt,
-    domains::accounts::service::AccountsService,
+    domains::{accounts::service::AccountsService, items::service::ItemsService},
     secrets::{self, SecretsManager},
 };
 
@@ -23,10 +23,12 @@ pub mod items;
 pub fn app_router(
     secrets_manager: impl SecretsManager,
     accounts_service: impl AccountsService,
+    items_service: impl ItemsService,
 ) -> Router {
     let app_state = AppState {
         secrets_manager: Arc::new(secrets_manager),
         accounts_service: Arc::new(accounts_service),
+        items_service: Arc::new(items_service),
     };
     Router::new()
         .route("/health", get(get_healthcheck))
@@ -40,6 +42,7 @@ pub fn app_router(
 pub struct AppState {
     secrets_manager: Arc<dyn SecretsManager>,
     accounts_service: Arc<dyn AccountsService>,
+    items_service: Arc<dyn ItemsService>,
 }
 
 #[derive(Serialize, Deserialize)]

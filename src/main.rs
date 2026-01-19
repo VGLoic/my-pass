@@ -78,12 +78,16 @@ async fn main() -> Result<(), anyhow::Error> {
     info!("Successfully ran migrations");
 
     let accounts_repository =
-        my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool);
+        my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool.clone());
     let accounts_notifier = my_pass::domains::accounts::notifier::DummyAccountsNotifier;
     let accounts_service = my_pass::domains::accounts::service::DefaultAccountsService::new(
         accounts_repository,
         accounts_notifier,
     );
+
+    let items_repository = my_pass::domains::items::repository::PsqlItemsRepository::new(pool);
+    let items_service =
+        my_pass::domains::items::service::DefaultItemsService::new(items_repository);
 
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|err| {
@@ -95,5 +99,5 @@ async fn main() -> Result<(), anyhow::Error> {
         listener.local_addr().unwrap()
     );
 
-    serve_http_server(listener, secrets_manager, accounts_service).await
+    serve_http_server(listener, secrets_manager, accounts_service, items_service).await
 }

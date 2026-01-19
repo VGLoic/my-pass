@@ -15,7 +15,6 @@ use thiserror::Error;
 pub struct Account {
     pub id: uuid::Uuid,
     pub email: Email,
-    #[allow(dead_code)]
     pub password_hash: Opaque<String>,
     pub verified: bool,
     pub private_key_symmetric_key_salt: Opaque<[u8; 16]>,

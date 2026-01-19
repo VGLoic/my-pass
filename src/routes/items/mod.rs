@@ -1,7 +1,9 @@
 use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 
 use super::{ApiError, AppState, AuthorizedAccount};
+use crate::domains::items::models::{FindItemsError, Item};
 
 pub fn items_router() -> Router<AppState> {
     Router::new().route("/", post(create_item).get(list_items))
@@ -36,11 +38,20 @@ pub struct CreateItemRequestHttpBody {
 // #########################################
 
 async fn list_items(
-    State(_app_state): State<AppState>,
-    _authorized_account: AuthorizedAccount,
+    State(app_state): State<AppState>,
+    authorized_account: AuthorizedAccount,
 ) -> Result<Json<Vec<ItemResponse>>, ApiError> {
-    let items = vec![];
-    Ok(Json(items))
+    let items = app_state
+        .items_service
+        .find_items_by_account_id(authorized_account.account_id)
+        .await
+        .map_err(|e| match e {
+            FindItemsError::AccountNotFound => ApiError::NotFound,
+            FindItemsError::Unknown(e) => {
+                ApiError::InternalServerError(e.context("failed to list items"))
+            }
+        })?;
+    Ok(Json(items.into_iter().map(ItemResponse::from).collect()))
 }
 
 // ######################################
@@ -61,4 +72,19 @@ pub struct ItemResponse {
     pub signature: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<Item> for ItemResponse {
+    fn from(item: Item) -> Self {
+        Self {
+            id: item.id,
+            ciphertext: BASE64_STANDARD.encode(item.ciphertext.unsafe_inner()),
+            encryption_nonce: BASE64_STANDARD.encode(item.encryption_nonce.unsafe_inner()),
+            encrypted_symmetric_key: BASE64_STANDARD
+                .encode(item.encrypted_symmetric_key.unsafe_inner()),
+            signature: BASE64_STANDARD.encode(item.signature.unsafe_inner()),
+            created_at: item.created_at,
+            updated_at: item.updated_at,
+        }
+    }
 }

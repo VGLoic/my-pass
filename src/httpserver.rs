@@ -13,7 +13,9 @@ use tower_http::{
 use tracing::{Span, error, info, info_span};
 
 use crate::{
-    domains::accounts::service::AccountsService, routes::app_router, secrets::SecretsManager,
+    domains::{accounts::service::AccountsService, items::service::ItemsService},
+    routes::app_router,
+    secrets::SecretsManager,
 };
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
@@ -22,10 +24,11 @@ pub async fn serve_http_server(
     tcp_listener: TcpListener,
     secrets_manager: impl SecretsManager,
     accounts_service: impl AccountsService,
+    items_service: impl ItemsService,
 ) -> Result<(), anyhow::Error> {
     let x_request_id = HeaderName::from_static(REQUEST_ID_HEADER);
 
-    let app = app_router(secrets_manager, accounts_service).layer((
+    let app = app_router(secrets_manager, accounts_service, items_service).layer((
         // Set `x-request-id` header for every request
         SetRequestIdLayer::new(x_request_id.clone(), MakeRequestUuid),
         // Log request and response
