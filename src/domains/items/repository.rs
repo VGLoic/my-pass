@@ -47,7 +47,8 @@ impl ItemsRepository for PsqlItemsRepository {
                 ciphertext, 
                 encryption_nonce, 
                 encrypted_symmetric_key, 
-                signature, 
+                signature_r, 
+                signature_s, 
                 created_at, 
                 updated_at
             FROM items

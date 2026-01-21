@@ -6,7 +6,8 @@ CREATE TABLE "item" (
     ciphertext                              BYTEA       NOT NULL,
     encryption_nonce                        BYTEA       NOT NULL,
     encrypted_symmetric_key                 BYTEA       NOT NULL,
-    signature                               BYTEA       NOT NULL,
+    signature_r                             BYTEA       NOT NULL,
+    signature_s                             BYTEA       NOT NULL,
     created_at                              TIMESTAMPTZ NOT NULL   DEFAULT CURRENT_TIMESTAMP,
     updated_at                              TIMESTAMPTZ NOT NULL   DEFAULT CURRENT_TIMESTAMP
 );
