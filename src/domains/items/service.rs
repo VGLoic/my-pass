@@ -58,6 +58,8 @@ impl<R: ItemsRepository> ItemsService for DefaultItemsService<R> {
     async fn create_item(&self, request: CreateItemRequest) -> Result<Item, CreateItemError> {
         let item = self.repository.create_item(request).await?;
 
+        // REMIND ME: add the notifier
+
         info!(
             "Created item with ID {} for account ID {}",
             item.id, item.account_id
