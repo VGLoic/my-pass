@@ -88,6 +88,8 @@ impl CreateItemRequest {
 
 #[derive(Debug, Error)]
 pub enum CreateItemError {
+    #[error("Account not found")]
+    AccountNotFound,
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
 }

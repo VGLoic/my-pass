@@ -1,4 +1,6 @@
-use super::models::{FindItemsError, Item};
+use tracing::info;
+
+use super::models::{CreateItemError, CreateItemRequest, FindItemsError, Item};
 use super::repository::ItemsRepository;
 
 /// Service trait for managing items.
@@ -19,6 +21,19 @@ pub trait ItemsService: Send + Sync + 'static {
         &self,
         account_id: uuid::Uuid,
     ) -> Result<Vec<Item>, FindItemsError>;
+
+    /// Creates a new item for the given account.
+    ///
+    /// # Arguments
+    /// * `request` - The CreateItemRequest containing the item details to be created.
+    ///
+    /// # Returns
+    /// * The created [Item].
+    ///
+    /// # Errors
+    /// MUST return CreateItemError::AccountNotFound if the account does not exist.
+    /// MUST return CreateItemError::Unknown for any other errors encountered during the operation.
+    async fn create_item(&self, request: CreateItemRequest) -> Result<Item, CreateItemError>;
 }
 
 pub struct DefaultItemsService<R: ItemsRepository> {
@@ -38,5 +53,16 @@ impl<R: ItemsRepository> ItemsService for DefaultItemsService<R> {
         account_id: uuid::Uuid,
     ) -> Result<Vec<Item>, FindItemsError> {
         self.repository.find_items_by_account_id(account_id).await
+    }
+
+    async fn create_item(&self, request: CreateItemRequest) -> Result<Item, CreateItemError> {
+        let item = self.repository.create_item(request).await?;
+
+        info!(
+            "Created item with ID {} for account ID {}",
+            item.id, item.account_id
+        );
+
+        Ok(item)
     }
 }

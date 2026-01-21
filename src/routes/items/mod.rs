@@ -6,7 +6,9 @@ use super::{ApiError, AppState, AuthorizedAccount};
 use crate::{
     domains::{
         accounts::models::{Account, FindAccountError},
-        items::models::{CreateItemRequest, CreateItemRequestError, FindItemsError, Item},
+        items::models::{
+            CreateItemError, CreateItemRequest, CreateItemRequestError, FindItemsError, Item,
+        },
     },
     newtypes::Opaque,
 };
@@ -35,7 +37,7 @@ async fn create_item(
             }
         })?;
 
-    let _request = body.try_into_domain(account).map_err(|e| match e {
+    let request = body.try_into_domain(account).map_err(|e| match e {
         CreateItemRequestMappingError::CiphertextFormat(msg) => {
             ApiError::BadRequest(format!("invalid ciphertext format: {msg}"))
         }
@@ -58,9 +60,18 @@ async fn create_item(
         },
     })?;
 
-    // REMIND ME: call service to create item
+    let item = app_state
+        .items_service
+        .create_item(request)
+        .await
+        .map_err(|e| match e {
+            CreateItemError::AccountNotFound => ApiError::NotFound,
+            CreateItemError::Unknown(e) => {
+                ApiError::InternalServerError(e.context("failed to create item"))
+            }
+        })?;
 
-    Err(ApiError::NotFound)
+    Ok((StatusCode::CREATED, Json(ItemResponse::from(item))))
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -262,14 +273,14 @@ mod tests {
 
         let encrypted_item = EncryptedItem::new(&private_key).unwrap();
         let request_body = CreateItemRequestHttpBody {
-            ciphertext: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.ciphertext)),
-            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.encryption_nonce)),
+            ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
+            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
             encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(&encrypted_item.encrypted_symmetric_key),
+                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
             ),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
-                    &[
+                    [
                         &encrypted_item.signature_r[..],
                         &encrypted_item.signature_s[..],
                     ]
@@ -291,13 +302,13 @@ mod tests {
         let bad_ciphertext = "!!!invalid_base64!!!";
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(bad_ciphertext.to_string()),
-            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.encryption_nonce)),
+            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
             encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(&encrypted_item.encrypted_symmetric_key),
+                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
             ),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
-                    &[
+                    [
                         &encrypted_item.signature_r[..],
                         &encrypted_item.signature_s[..],
                     ]
@@ -320,14 +331,14 @@ mod tests {
         let encrypted_item = EncryptedItem::new(&private_key).unwrap();
         let bad_encryption_nonce = "!!!invalid_base64!!!";
         let request_body = CreateItemRequestHttpBody {
-            ciphertext: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.ciphertext)),
+            ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
             encryption_nonce: Opaque::new(bad_encryption_nonce.to_string()),
             encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(&encrypted_item.encrypted_symmetric_key),
+                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
             ),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
-                    &[
+                    [
                         &encrypted_item.signature_r[..],
                         &encrypted_item.signature_s[..],
                     ]
@@ -348,16 +359,16 @@ mod tests {
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
         let encrypted_item = EncryptedItem::new(&private_key).unwrap();
-        let bad_encryption_nonce = BASE64_STANDARD.encode(&[0u8; 10]); // should be 12 bytes
+        let bad_encryption_nonce = BASE64_STANDARD.encode([0u8; 10]); // should be 12 bytes
         let request_body = CreateItemRequestHttpBody {
-            ciphertext: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.ciphertext)),
+            ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
             encryption_nonce: Opaque::new(bad_encryption_nonce),
             encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(&encrypted_item.encrypted_symmetric_key),
+                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
             ),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
-                    &[
+                    [
                         &encrypted_item.signature_r[..],
                         &encrypted_item.signature_s[..],
                     ]
@@ -380,12 +391,12 @@ mod tests {
         let encrypted_item = EncryptedItem::new(&private_key).unwrap();
         let bad_encrypted_symmetric_key = "!!!invalid_base64!!!";
         let request_body = CreateItemRequestHttpBody {
-            ciphertext: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.ciphertext)),
-            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.encryption_nonce)),
+            ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
+            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
             encrypted_symmetric_key: Opaque::new(bad_encrypted_symmetric_key.to_string()),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
-                    &[
+                    [
                         &encrypted_item.signature_r[..],
                         &encrypted_item.signature_s[..],
                     ]
@@ -410,10 +421,10 @@ mod tests {
         let encrypted_item = EncryptedItem::new(&private_key).unwrap();
         let bad_signature = "!!!invalid_base64!!!";
         let request_body = CreateItemRequestHttpBody {
-            ciphertext: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.ciphertext)),
-            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.encryption_nonce)),
+            ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
+            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
             encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(&encrypted_item.encrypted_symmetric_key),
+                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
             ),
             signature: Opaque::new(bad_signature.to_string()),
         };
@@ -430,12 +441,12 @@ mod tests {
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
         let encrypted_item = EncryptedItem::new(&private_key).unwrap();
-        let bad_signature = BASE64_STANDARD.encode(&[0u8; 10]); // should be 64 bytes
+        let bad_signature = BASE64_STANDARD.encode([0u8; 10]); // should be 64 bytes
         let request_body = CreateItemRequestHttpBody {
-            ciphertext: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.ciphertext)),
-            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(&encrypted_item.encryption_nonce)),
+            ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
+            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
             encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(&encrypted_item.encrypted_symmetric_key),
+                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
             ),
             signature: Opaque::new(bad_signature),
         };

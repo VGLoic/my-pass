@@ -188,7 +188,7 @@ impl PrivateKey {
             symmetric_key_salt: symmetric_key_salt.into(),
             encryption_nonce: encryption_nonce.into(),
             ciphertext: ciphertext.into(),
-            public_key: self.public_key().to_bytes().into(),
+            public_key: self.public_key().to_bytes(),
         })
     }
 }
