@@ -86,8 +86,11 @@ async fn main() -> Result<(), anyhow::Error> {
     );
 
     let items_repository = my_pass::domains::items::repository::PsqlItemsRepository::new(pool);
-    let items_service =
-        my_pass::domains::items::service::DefaultItemsService::new(items_repository);
+    let items_notifier = my_pass::domains::items::notifier::DummyItemsNotifier;
+    let items_service = my_pass::domains::items::service::DefaultItemsService::new(
+        items_repository,
+        items_notifier,
+    );
 
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|err| {

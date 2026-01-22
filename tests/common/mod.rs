@@ -97,8 +97,11 @@ pub async fn setup_instance(
     );
 
     let items_repository = my_pass::domains::items::repository::PsqlItemsRepository::new(pool);
-    let items_service =
-        my_pass::domains::items::service::DefaultItemsService::new(items_repository);
+    let items_notifier = my_pass::domains::items::notifier::DummyItemsNotifier;
+    let items_service = my_pass::domains::items::service::DefaultItemsService::new(
+        items_repository,
+        items_notifier,
+    );
 
     let listener = if config.port == 0 {
         bind_listener_to_free_port().await?

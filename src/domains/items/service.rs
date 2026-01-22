@@ -1,6 +1,7 @@
 use tracing::info;
 
 use super::models::{CreateItemError, CreateItemRequest, FindItemsError, Item};
+use super::notifier::ItemsNotifier;
 use super::repository::ItemsRepository;
 
 /// Service trait for managing items.
@@ -36,18 +37,22 @@ pub trait ItemsService: Send + Sync + 'static {
     async fn create_item(&self, request: CreateItemRequest) -> Result<Item, CreateItemError>;
 }
 
-pub struct DefaultItemsService<R: ItemsRepository> {
+pub struct DefaultItemsService<R: ItemsRepository, N: ItemsNotifier> {
     repository: R,
+    notifier: N,
 }
 
-impl<R: ItemsRepository> DefaultItemsService<R> {
-    pub fn new(repository: R) -> Self {
-        Self { repository }
+impl<R: ItemsRepository, N: ItemsNotifier> DefaultItemsService<R, N> {
+    pub fn new(repository: R, notifier: N) -> Self {
+        Self {
+            repository,
+            notifier,
+        }
     }
 }
 
 #[async_trait::async_trait]
-impl<R: ItemsRepository> ItemsService for DefaultItemsService<R> {
+impl<R: ItemsRepository, N: ItemsNotifier> ItemsService for DefaultItemsService<R, N> {
     async fn find_items_by_account_id(
         &self,
         account_id: uuid::Uuid,
@@ -58,7 +63,7 @@ impl<R: ItemsRepository> ItemsService for DefaultItemsService<R> {
     async fn create_item(&self, request: CreateItemRequest) -> Result<Item, CreateItemError> {
         let item = self.repository.create_item(request).await?;
 
-        // REMIND ME: add the notifier
+        self.notifier.item_created(&item).await;
 
         info!(
             "Created item with ID {} for account ID {}",
