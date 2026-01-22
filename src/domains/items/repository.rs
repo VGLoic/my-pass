@@ -57,12 +57,12 @@ impl ItemsRepository for PsqlItemsRepository {
                 account_id, 
                 ciphertext, 
                 encryption_nonce, 
-                encrypted_symmetric_key, 
+                ephemeral_public_key, 
                 signature_r, 
                 signature_s, 
                 created_at, 
                 updated_at
-            FROM items
+            FROM item
             WHERE account_id = $1
             ORDER BY created_at DESC
             "#,
@@ -91,7 +91,7 @@ impl ItemsRepository for PsqlItemsRepository {
         let account_exists = query_as::<_, (i64,)>(
             r#"
             SELECT COUNT(1)
-            FROM accounts 
+            FROM account
             WHERE id = $1
             "#,
         )
@@ -108,7 +108,7 @@ impl ItemsRepository for PsqlItemsRepository {
         }
         let item = query_as::<_, Item>(
             r#"
-            INSERT INTO items (
+            INSERT INTO item (
                 account_id, 
                 ciphertext, 
                 encryption_nonce, 

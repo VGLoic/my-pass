@@ -13,7 +13,7 @@ pub struct Item {
     pub account_id: uuid::Uuid,
     pub ciphertext: Opaque<Vec<u8>>,
     pub encryption_nonce: Opaque<[u8; 12]>,
-    pub encrypted_symmetric_key: Opaque<Vec<u8>>,
+    pub ephemeral_public_key: Opaque<Vec<u8>>,
     pub signature_r: Opaque<[u8; 32]>,
     pub signature_s: Opaque<[u8; 32]>,
     pub created_at: chrono::DateTime<chrono::Utc>,

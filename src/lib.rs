@@ -1,5 +1,5 @@
 pub mod config;
-mod crypto;
+pub mod crypto;
 pub mod domains;
 pub mod httpserver;
 pub mod newtypes;

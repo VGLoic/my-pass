@@ -187,8 +187,8 @@ pub struct ItemResponse {
     pub ciphertext: String,
     /// The nonce used for encryption - encoded in base64
     pub encryption_nonce: String,
-    /// The encrypted symmetric key used for item encryption - encoded in base64
-    pub encrypted_symmetric_key: String,
+    /// The ephemeral public key used for item encryption - encoded in base64
+    pub ephemeral_public_key: String,
     /// The signature of the ciphertext - encoded in base64
     pub signature: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -206,8 +206,7 @@ impl From<Item> for ItemResponse {
             id: item.id,
             ciphertext: BASE64_STANDARD.encode(item.ciphertext.unsafe_inner()),
             encryption_nonce: BASE64_STANDARD.encode(item.encryption_nonce.unsafe_inner()),
-            encrypted_symmetric_key: BASE64_STANDARD
-                .encode(item.encrypted_symmetric_key.unsafe_inner()),
+            ephemeral_public_key: BASE64_STANDARD.encode(item.ephemeral_public_key.unsafe_inner()),
             signature: BASE64_STANDARD.encode(&full_sig),
             created_at: item.created_at,
             updated_at: item.updated_at,

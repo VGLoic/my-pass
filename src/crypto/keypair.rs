@@ -123,7 +123,6 @@ impl PrivateKey {
         }
     }
 
-    #[cfg(test)]
     pub fn encapsulation_public_key(&self) -> EncapsulationPublicKey {
         let private_secret = x25519_dalek::StaticSecret::from(self.key);
         let public_key = x25519_dalek::PublicKey::from(&private_secret);
@@ -135,7 +134,6 @@ impl PrivateKey {
     /// * `message` - The message to be signed
     /// # Returns
     /// Returns a tuple containing the 'r' and 's' components of the signature.
-    #[cfg(test)]
     pub fn sign(&self, message: &[u8]) -> Result<([u8; 32], [u8; 32]), anyhow::Error> {
         use ed25519_dalek::Signer;
 
@@ -206,12 +204,10 @@ impl PrivateKey {
     }
 }
 
-#[cfg(test)]
 pub struct EncapsulationPublicKey {
     key: [u8; 32],
 }
 
-#[cfg(test)]
 impl EncapsulationPublicKey {
     pub fn new(key: Opaque<[u8; 32]>) -> Self {
         Self {
@@ -267,13 +263,11 @@ pub struct SymmetricKey {
     key: [u8; 32],
 }
 
-#[cfg(test)]
 pub struct EncapsulatedSymmetricKey {
     shared_key: SymmetricKey,
     ephemeral_public_key: EncapsulationPublicKey,
 }
 
-#[cfg(test)]
 impl EncapsulatedSymmetricKey {
     pub fn symmetric_key(&self) -> &SymmetricKey {
         &self.shared_key
@@ -293,7 +287,6 @@ impl SymmetricKey {
         Self { key }
     }
 
-    #[cfg(test)]
     pub fn encapsulate(
         public_key: &EncapsulationPublicKey,
     ) -> Result<EncapsulatedSymmetricKey, anyhow::Error> {

@@ -195,6 +195,7 @@ Handler logic:
 
 **Client Side:**
 - The user must be logged in,
+REMIND ME to update
 - The client encrypts the item data before sending it to the server:
     1. Generates a random symmetric encryption key for the item,
     2. Generates a random nonce for AES-256-GCM,
@@ -211,7 +212,7 @@ Endpoint: `POST /api/accounts/items` with Authorization header and request body:
 {
   "ciphertext": "<item_ciphertext>",
   "encryptionNonce": "<item_encryption_nonce>",
-  "encryptedSymmetricKey": "<item_encrypted_symmetric_key>",
+  "ephemeralPublicKey": "<item_ephemeral_public_key>",
   "signature": "<item_signature>"
 }
 ```
