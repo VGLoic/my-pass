@@ -5,7 +5,7 @@ CREATE TABLE "item" (
     account_id                              UUID        NOT NULL,
     ciphertext                              BYTEA       NOT NULL,
     encryption_nonce                        BYTEA       NOT NULL,
-    encrypted_symmetric_key                 BYTEA       NOT NULL,
+    ephemeral_public_key                    BYTEA       NOT NULL,
     signature_r                             BYTEA       NOT NULL,
     signature_s                             BYTEA       NOT NULL,
     created_at                              TIMESTAMPTZ NOT NULL   DEFAULT CURRENT_TIMESTAMP,

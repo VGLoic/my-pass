@@ -123,6 +123,13 @@ impl PrivateKey {
         }
     }
 
+    #[cfg(test)]
+    pub fn encapsulation_public_key(&self) -> EncapsulationPublicKey {
+        let private_secret = x25519_dalek::StaticSecret::from(self.key);
+        let public_key = x25519_dalek::PublicKey::from(&private_secret);
+        EncapsulationPublicKey::new(Opaque::new(public_key.to_bytes()))
+    }
+
     /// Signs a message using the private key.
     /// # Arguments
     /// * `message` - The message to be signed
@@ -143,15 +150,21 @@ impl PrivateKey {
         ))
     }
 
-    /// Decrypts ciphertext using the private key
+    /// Decapsulates an encapsulated symmetric key using the private key.
     /// # Arguments
-    /// * `ciphertext` - The ciphertext data to be decrypted
+    /// * `encapsulated_symmetric_key` - The encapsulated symmetric key to be decapsulated
     /// # Returns
-    /// Returns the decrypted plaintext
+    /// Returns the decapsulated symmetric key.
     #[cfg(test)]
     #[allow(dead_code)]
-    pub fn decrypt(&self, _ciphertext: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        unimplemented!("decryption not implemented for PrivateKey")
+    pub fn decapsulate(
+        &self,
+        ephemeral_public_key: &EncapsulationPublicKey,
+    ) -> Result<SymmetricKey, anyhow::Error> {
+        let private_secret = x25519_dalek::StaticSecret::from(self.key);
+        let ephemeral_public_key = x25519_dalek::PublicKey::from(ephemeral_public_key.key);
+        let shared_secret = private_secret.diffie_hellman(&ephemeral_public_key);
+        Ok(SymmetricKey::new(shared_secret.to_bytes()))
     }
 
     /// Encrypts the private key using the provided password.
@@ -193,6 +206,24 @@ impl PrivateKey {
     }
 }
 
+#[cfg(test)]
+pub struct EncapsulationPublicKey {
+    key: [u8; 32],
+}
+
+#[cfg(test)]
+impl EncapsulationPublicKey {
+    pub fn new(key: Opaque<[u8; 32]>) -> Self {
+        Self {
+            key: key.unsafe_inner().to_owned(),
+        }
+    }
+
+    pub fn to_bytes(&self) -> Opaque<[u8; 32]> {
+        Opaque::new(self.key)
+    }
+}
+
 pub struct PublicKey {
     key: [u8; 32],
 }
@@ -206,16 +237,6 @@ impl PublicKey {
 
     pub fn to_bytes(&self) -> Opaque<[u8; 32]> {
         Opaque::new(self.key)
-    }
-
-    /// Encrypts plaintext using the public key
-    /// # Arguments
-    /// * `plaintext` - The plaintext data to be encrypted
-    /// # Returns
-    /// Returns the encrypted ciphertext
-    #[cfg(test)]
-    pub fn encrypt(&self, _plaintext: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        unimplemented!("encryption not implemented for PublicKey")
     }
 
     /// Verifies a digital signature using the Ed25519 algorithm.
@@ -246,6 +267,22 @@ pub struct SymmetricKey {
     key: [u8; 32],
 }
 
+#[cfg(test)]
+pub struct EncapsulatedSymmetricKey {
+    shared_key: SymmetricKey,
+    ephemeral_public_key: EncapsulationPublicKey,
+}
+
+#[cfg(test)]
+impl EncapsulatedSymmetricKey {
+    pub fn symmetric_key(&self) -> &SymmetricKey {
+        &self.shared_key
+    }
+    pub fn ephemeral_public_key(&self) -> &EncapsulationPublicKey {
+        &self.ephemeral_public_key
+    }
+}
+
 impl SymmetricKey {
     #[cfg(test)]
     pub fn generate() -> Self {
@@ -257,8 +294,21 @@ impl SymmetricKey {
     }
 
     #[cfg(test)]
-    pub fn to_bytes(&self) -> Opaque<[u8; 32]> {
-        Opaque::new(self.key)
+    pub fn encapsulate(
+        public_key: &EncapsulationPublicKey,
+    ) -> Result<EncapsulatedSymmetricKey, anyhow::Error> {
+        let ephemeral_secret = x25519_dalek::EphemeralSecret::random();
+        let ephemeral_public_key = x25519_dalek::PublicKey::from(&ephemeral_secret);
+
+        let recipient_public_key = x25519_dalek::PublicKey::from(public_key.key);
+        let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public_key);
+        let shared_key = SymmetricKey::new(shared_secret.to_bytes());
+        Ok(EncapsulatedSymmetricKey {
+            shared_key,
+            ephemeral_public_key: EncapsulationPublicKey::new(Opaque::new(
+                ephemeral_public_key.to_bytes(),
+            )),
+        })
     }
 
     pub fn encrypt(&self, plaintext: &[u8], nonce: &[u8; 12]) -> Result<Vec<u8>, anyhow::Error> {
@@ -285,5 +335,59 @@ impl SymmetricKey {
             .map_err(|e| anyhow!("{e}").context("failed to decrypt data"))?;
 
         Ok(plaintext)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fake::{Fake, Faker};
+
+    use super::*;
+
+    #[test]
+    fn test_symmetric_key_encryption_decryption() {
+        let symmetric_key = SymmetricKey::generate();
+        let plaintext: [u8; 32] = rand::random();
+        let nonce: [u8; 12] = rand::random();
+
+        let ciphertext = symmetric_key.encrypt(&plaintext, &nonce).unwrap();
+        let decrypted_plaintext = symmetric_key.decrypt(&ciphertext, &nonce).unwrap();
+
+        assert_eq!(plaintext.to_vec(), decrypted_plaintext);
+    }
+
+    #[test]
+    fn test_key_pair_encryption_decryption() {
+        let private_key = PrivateKey::generate();
+        let password: Password = Faker.fake();
+        let encrypted_key_pair = private_key
+            .encrypt_key_pair_with_password(password.clone())
+            .unwrap();
+        assert!(
+            EncryptedKeyPair::new(
+                password,
+                encrypted_key_pair.symmetric_key_salt().clone(),
+                encrypted_key_pair.encryption_nonce().clone(),
+                encrypted_key_pair.ciphertext().clone(),
+                private_key.public_key().to_bytes(),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_symmetric_key_encapsulation_decapsulation() {
+        let private_key = PrivateKey::generate();
+        let public_key = private_key.encapsulation_public_key();
+
+        let encapsulated_symmetric_key =
+            SymmetricKey::encapsulate(&public_key).expect("Failed to encapsulate symmetric key");
+        let decapsulated_symmetric_key = private_key
+            .decapsulate(encapsulated_symmetric_key.ephemeral_public_key())
+            .expect("Failed to decapsulate symmetric key");
+        assert_eq!(
+            encapsulated_symmetric_key.shared_key.key, decapsulated_symmetric_key.key,
+            "Decapsulated key should match the original symmetric key"
+        );
     }
 }

@@ -28,7 +28,7 @@ pub struct CreateItemRequest {
     account_id: uuid::Uuid,
     ciphertext: Opaque<Vec<u8>>,
     encryption_nonce: Opaque<[u8; 12]>,
-    encrypted_symmetric_key: Opaque<Vec<u8>>,
+    ephemeral_public_key: PublicKey,
     signature_r: Opaque<[u8; 32]>,
     signature_s: Opaque<[u8; 32]>,
 }
@@ -47,7 +47,7 @@ impl CreateItemRequest {
         account_public_key: Opaque<[u8; 32]>,
         ciphertext: Opaque<Vec<u8>>,
         encryption_nonce: Opaque<[u8; 12]>,
-        encrypted_symmetric_key: Opaque<Vec<u8>>,
+        ephemeral_public_key: PublicKey,
         signature_r: Opaque<[u8; 32]>,
         signature_s: Opaque<[u8; 32]>,
     ) -> Result<Self, CreateItemRequestError> {
@@ -59,7 +59,7 @@ impl CreateItemRequest {
             account_id,
             ciphertext,
             encryption_nonce,
-            encrypted_symmetric_key,
+            ephemeral_public_key,
             signature_r,
             signature_s,
         })
@@ -75,8 +75,8 @@ impl CreateItemRequest {
     pub fn encryption_nonce(&self) -> &Opaque<[u8; 12]> {
         &self.encryption_nonce
     }
-    pub fn encrypted_symmetric_key(&self) -> &Opaque<Vec<u8>> {
-        &self.encrypted_symmetric_key
+    pub fn ephemeral_public_key(&self) -> &PublicKey {
+        &self.ephemeral_public_key
     }
     pub fn signature_r(&self) -> &Opaque<[u8; 32]> {
         &self.signature_r
@@ -118,32 +118,34 @@ mod tests {
     struct EncryptedItem {
         ciphertext: Vec<u8>,
         encryption_nonce: [u8; 12],
-        encrypted_symmetric_key: Vec<u8>,
+        ephemeral_public_key: [u8; 32],
         signature_r: [u8; 32],
         signature_s: [u8; 32],
     }
     impl EncryptedItem {
         fn new(private_key: &PrivateKey) -> Result<Self, anyhow::Error> {
             let plaintext: [u8; 32] = rand::random();
-            let symmetric_key = SymmetricKey::generate();
+            let encapsulated_symmetric_key =
+                SymmetricKey::encapsulate(&private_key.encapsulation_public_key()).map_err(
+                    |e| anyhow::anyhow!("{e}").context("failed to encrypt symmetric key for test"),
+                )?;
             let encryption_nonce: [u8; 12] = rand::random();
 
-            let ciphertext = symmetric_key
+            let ciphertext = encapsulated_symmetric_key
+                .symmetric_key()
                 .encrypt(&plaintext, &encryption_nonce)
                 .map_err(|e| anyhow::anyhow!("{e}").context("failed to encrypt test plaintext"))?;
-            let encrypted_symmetric_key = private_key
-                .public_key()
-                .encrypt(symmetric_key.to_bytes().unsafe_inner())
-                .map_err(|e| {
-                    anyhow::anyhow!("{e}").context("failed to encrypt symmetric key for test")
-                })?;
 
             let (signature_r, signature_s) = private_key.sign(&ciphertext)?;
 
             Ok(Self {
                 ciphertext,
                 encryption_nonce,
-                encrypted_symmetric_key,
+                ephemeral_public_key: encapsulated_symmetric_key
+                    .ephemeral_public_key()
+                    .to_bytes()
+                    .unsafe_inner()
+                    .to_owned(),
                 signature_r,
                 signature_s,
             })
@@ -165,7 +167,7 @@ mod tests {
             account_public_key.to_bytes(),
             Opaque::new(encrypted_item.ciphertext),
             Opaque::new(encrypted_item.encryption_nonce),
-            Opaque::new(encrypted_item.encrypted_symmetric_key),
+            PublicKey::new(encrypted_item.ephemeral_public_key.into()),
             Opaque::new(invalid_signature_r),
             Opaque::new(encrypted_item.signature_s),
         );
@@ -187,7 +189,7 @@ mod tests {
             account_public_key.to_bytes(),
             Opaque::new(encrypted_item.ciphertext.clone()),
             Opaque::new(encrypted_item.encryption_nonce),
-            Opaque::new(encrypted_item.encrypted_symmetric_key.clone()),
+            PublicKey::new(encrypted_item.ephemeral_public_key.into()),
             Opaque::new(encrypted_item.signature_r),
             Opaque::new(encrypted_item.signature_s),
         );
@@ -203,8 +205,11 @@ mod tests {
             &encrypted_item.encryption_nonce
         );
         assert_eq!(
-            create_item_request.encrypted_symmetric_key().unsafe_inner(),
-            &encrypted_item.encrypted_symmetric_key
+            create_item_request
+                .ephemeral_public_key()
+                .to_bytes()
+                .unsafe_inner(),
+            &encrypted_item.ephemeral_public_key
         );
         assert_eq!(
             create_item_request.signature_r().unsafe_inner(),

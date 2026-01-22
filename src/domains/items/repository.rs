@@ -112,7 +112,7 @@ impl ItemsRepository for PsqlItemsRepository {
                 account_id, 
                 ciphertext, 
                 encryption_nonce, 
-                encrypted_symmetric_key, 
+                ephemeral_public_key, 
                 signature_r, 
                 signature_s
             ) VALUES ($1, $2, $3, $4, $5, $6)
@@ -121,7 +121,7 @@ impl ItemsRepository for PsqlItemsRepository {
                 account_id, 
                 ciphertext, 
                 encryption_nonce, 
-                encrypted_symmetric_key, 
+                ephemeral_public_key, 
                 signature_r, 
                 signature_s, 
                 created_at, 
@@ -131,7 +131,7 @@ impl ItemsRepository for PsqlItemsRepository {
         .bind(request.account_id())
         .bind(request.ciphertext())
         .bind(request.encryption_nonce())
-        .bind(request.encrypted_symmetric_key())
+        .bind(request.ephemeral_public_key().to_bytes())
         .bind(request.signature_r())
         .bind(request.signature_s())
         .fetch_one(&mut *transaction)

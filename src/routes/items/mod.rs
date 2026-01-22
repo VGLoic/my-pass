@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ApiError, AppState, AuthorizedAccount};
 use crate::{
+    crypto::keypair::PublicKey,
     domains::{
         accounts::models::{Account, FindAccountError},
         items::models::{
@@ -44,8 +45,8 @@ async fn create_item(
         CreateItemRequestMappingError::EncryptionNonceFormat(msg) => {
             ApiError::BadRequest(format!("invalid encryption nonce format: {msg}"))
         }
-        CreateItemRequestMappingError::EncryptedSymmetricKeyFormat(msg) => {
-            ApiError::BadRequest(format!("invalid encrypted symmetric key format: {msg}"))
+        CreateItemRequestMappingError::EphemeralPublicKeyFormat(msg) => {
+            ApiError::BadRequest(format!("invalid ephemeral public key format: {msg}"))
         }
         CreateItemRequestMappingError::SignatureFormat(msg) => {
             ApiError::BadRequest(format!("invalid signature format: {msg}"))
@@ -81,8 +82,8 @@ pub struct CreateItemRequestHttpBody {
     pub ciphertext: Opaque<String>,
     /// The nonce used for encryption - encoded in base64
     pub encryption_nonce: Opaque<String>,
-    /// The encrypted symmetric key used for item encryption - encoded in base64
-    pub encrypted_symmetric_key: Opaque<String>,
+    /// The ephemeral public key used for item encryption - encoded in base64
+    pub ephemeral_public_key: Opaque<String>,
     /// The signature of the ciphertext - encoded in base64
     pub signature: Opaque<String>,
 }
@@ -91,7 +92,7 @@ pub struct CreateItemRequestHttpBody {
 enum CreateItemRequestMappingError {
     CiphertextFormat(String),
     EncryptionNonceFormat(String),
-    EncryptedSymmetricKeyFormat(String),
+    EphemeralPublicKeyFormat(String),
     SignatureFormat(String),
     Request(CreateItemRequestError),
 }
@@ -112,13 +113,8 @@ impl CreateItemRequestHttpBody {
         let encryption_nonce = base64_to_array::<12>(self.encryption_nonce.unsafe_inner())
             .map_err(CreateItemRequestMappingError::EncryptionNonceFormat)?;
 
-        let encrypted_symmetric_key = BASE64_STANDARD
-            .decode(self.encrypted_symmetric_key.unsafe_inner())
-            .map_err(|e| {
-                CreateItemRequestMappingError::EncryptedSymmetricKeyFormat(format!(
-                    "Invalid base64 format: {e}"
-                ))
-            })?;
+        let ephemeral_public_key = base64_to_array::<32>(self.ephemeral_public_key.unsafe_inner())
+            .map_err(CreateItemRequestMappingError::EphemeralPublicKeyFormat)?;
 
         let full_signature = base64_to_array::<64>(self.signature.unsafe_inner())
             .map_err(CreateItemRequestMappingError::SignatureFormat)?;
@@ -135,7 +131,7 @@ impl CreateItemRequestHttpBody {
             account.public_key,
             ciphertext.into(),
             encryption_nonce.into(),
-            encrypted_symmetric_key.into(),
+            PublicKey::new(ephemeral_public_key.into()),
             signature_r.into(),
             signature_s.into(),
         )
@@ -231,32 +227,34 @@ mod tests {
     struct EncryptedItem {
         ciphertext: Vec<u8>,
         encryption_nonce: [u8; 12],
-        encrypted_symmetric_key: Vec<u8>,
+        ephemeral_public_key: [u8; 32],
         signature_r: [u8; 32],
         signature_s: [u8; 32],
     }
     impl EncryptedItem {
         fn new(private_key: &PrivateKey) -> Result<Self, anyhow::Error> {
             let plaintext: [u8; 32] = rand::random();
-            let symmetric_key = SymmetricKey::generate();
+            let encapsulated_symmetric_key =
+                SymmetricKey::encapsulate(&private_key.encapsulation_public_key()).map_err(
+                    |e| anyhow::anyhow!("{e}").context("failed to encrypt symmetric key for test"),
+                )?;
             let encryption_nonce: [u8; 12] = rand::random();
 
-            let ciphertext = symmetric_key
+            let ciphertext = encapsulated_symmetric_key
+                .symmetric_key()
                 .encrypt(&plaintext, &encryption_nonce)
                 .map_err(|e| anyhow::anyhow!("{e}").context("failed to encrypt test plaintext"))?;
-            let encrypted_symmetric_key = private_key
-                .public_key()
-                .encrypt(symmetric_key.to_bytes().unsafe_inner())
-                .map_err(|e| {
-                    anyhow::anyhow!("{e}").context("failed to encrypt symmetric key for test")
-                })?;
 
             let (signature_r, signature_s) = private_key.sign(&ciphertext)?;
 
             Ok(Self {
                 ciphertext,
                 encryption_nonce,
-                encrypted_symmetric_key,
+                ephemeral_public_key: encapsulated_symmetric_key
+                    .ephemeral_public_key()
+                    .to_bytes()
+                    .unsafe_inner()
+                    .to_owned(),
                 signature_r,
                 signature_s,
             })
@@ -275,8 +273,8 @@ mod tests {
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
             encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
-            encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
+            ephemeral_public_key: Opaque::new(
+                BASE64_STANDARD.encode(encrypted_item.ephemeral_public_key),
             ),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
@@ -303,8 +301,8 @@ mod tests {
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(bad_ciphertext.to_string()),
             encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
-            encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
+            ephemeral_public_key: Opaque::new(
+                BASE64_STANDARD.encode(encrypted_item.ephemeral_public_key),
             ),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
@@ -333,8 +331,8 @@ mod tests {
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
             encryption_nonce: Opaque::new(bad_encryption_nonce.to_string()),
-            encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
+            ephemeral_public_key: Opaque::new(
+                BASE64_STANDARD.encode(encrypted_item.ephemeral_public_key),
             ),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
@@ -363,8 +361,8 @@ mod tests {
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
             encryption_nonce: Opaque::new(bad_encryption_nonce),
-            encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
+            ephemeral_public_key: Opaque::new(
+                BASE64_STANDARD.encode(encrypted_item.ephemeral_public_key),
             ),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
@@ -384,16 +382,16 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_create_item_request_mapping_bad_encoding_symmetric_key() {
+    fn test_invalid_create_item_request_mapping_bad_encoding_ephemeral_public_key() {
         let private_key = PrivateKey::generate();
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
         let encrypted_item = EncryptedItem::new(&private_key).unwrap();
-        let bad_encrypted_symmetric_key = "!!!invalid_base64!!!";
+        let bad_ephemeral_public_key = "!!!invalid_base64!!!";
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
             encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
-            encrypted_symmetric_key: Opaque::new(bad_encrypted_symmetric_key.to_string()),
+            ephemeral_public_key: Opaque::new(bad_ephemeral_public_key.to_string()),
             signature: Opaque::new(
                 BASE64_STANDARD.encode(
                     [
@@ -407,9 +405,35 @@ mod tests {
         let result = request_body.try_into_domain(account);
         assert!(matches!(
             result,
-            Err(CreateItemRequestMappingError::EncryptedSymmetricKeyFormat(
-                _
-            ))
+            Err(CreateItemRequestMappingError::EphemeralPublicKeyFormat(_))
+        ));
+    }
+
+    #[test]
+    fn test_invalid_create_item_request_mapping_bad_length_ephemeral_public_key() {
+        let private_key = PrivateKey::generate();
+        let mut account = fake_account();
+        account.public_key = private_key.public_key().to_bytes();
+        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let bad_ephemeral_public_key = BASE64_STANDARD.encode([0u8; 10]); // should be 32 bytes
+        let request_body = CreateItemRequestHttpBody {
+            ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
+            encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
+            ephemeral_public_key: Opaque::new(bad_ephemeral_public_key),
+            signature: Opaque::new(
+                BASE64_STANDARD.encode(
+                    [
+                        &encrypted_item.signature_r[..],
+                        &encrypted_item.signature_s[..],
+                    ]
+                    .concat(),
+                ),
+            ),
+        };
+        let result = request_body.try_into_domain(account);
+        assert!(matches!(
+            result,
+            Err(CreateItemRequestMappingError::EphemeralPublicKeyFormat(_))
         ));
     }
 
@@ -423,8 +447,8 @@ mod tests {
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
             encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
-            encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
+            ephemeral_public_key: Opaque::new(
+                BASE64_STANDARD.encode(encrypted_item.ephemeral_public_key),
             ),
             signature: Opaque::new(bad_signature.to_string()),
         };
@@ -445,8 +469,8 @@ mod tests {
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
             encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
-            encrypted_symmetric_key: Opaque::new(
-                BASE64_STANDARD.encode(encrypted_item.encrypted_symmetric_key),
+            ephemeral_public_key: Opaque::new(
+                BASE64_STANDARD.encode(encrypted_item.ephemeral_public_key),
             ),
             signature: Opaque::new(bad_signature),
         };

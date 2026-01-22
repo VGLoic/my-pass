@@ -27,7 +27,8 @@ MyPass is a password management application designed to securely store and manag
 - Password and key derivation: Argon2id,
 - Symmetric encryption (with authentication): AES-256-GCM,
 - Message authentication: HMAC-SHA-256,
-- Asymmetric encryption: Ed25519 curve with EdDSA signature scheme.
+- Asymetric signature: Ed25519,
+- Asymetric encryption: scalar multiplication on Curve25519.
 
 ## Implementation of the user stories
 
@@ -199,8 +200,8 @@ Handler logic:
     2. Generates a random nonce for AES-256-GCM,
     3. Symmetrically encrypts the item data using AES-256-GCM with the generated symmetric key and nonce, result is `ciphertext`,
     4. Derives the user's public key from the user's Ed25519 key pair stored on the client,
-    5. Encrypts the symmetric encryption key using Ed25519 asymmetric encryption with the user's public key, result is `encryptedSymmetricKey`.
-    6. Signs the ciphertext using the Ed25519 secret key, result is `signature`,
+    5. Encrypts the symmetric encryption key using curve 25519 asymmetric encryption with the user's public key, result is `encryptedSymmetricKey`.
+    6. Signs the ciphertext using Ed25519, result is `signature`,
 - The client sends the signature, the ciphertext, the nonce and the encrypted symmetric key to the server using the endpoint described below.
 
 **Server Side:**
