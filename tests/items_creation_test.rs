@@ -7,9 +7,12 @@ use common::{default_test_config, setup_instance};
 use my_pass::{
     crypto::keypair::PrivateKey,
     newtypes::{Email, Opaque, Password},
-    routes::accounts::{
-        EncryptedKeyPairHttpBody, LoginRequestHttpBody, LoginResponse, SignUpRequestHttpBody,
-        UseVerificationTicketRequestHttpBody,
+    routes::{
+        accounts::{
+            EncryptedKeyPairHttpBody, LoginRequestHttpBody, LoginResponse, SignUpRequestHttpBody,
+            UseVerificationTicketRequestHttpBody,
+        },
+        items::ItemResponse,
     },
 };
 
@@ -139,15 +142,18 @@ async fn test_item_creation() {
         StatusCode::CREATED
     );
 
-    assert_eq!(
-        instance_state
-            .reqwest_client
-            .get(format!("{}/api/items", &instance_state.server_url))
-            .bearer_auth(access_token.unsafe_inner())
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::OK
-    );
+    let get_items_response = instance_state
+        .reqwest_client
+        .get(format!("{}/api/items", &instance_state.server_url))
+        .bearer_auth(access_token.unsafe_inner())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get_items_response.status(), StatusCode::OK);
+    let items = get_items_response
+        .json::<Vec<ItemResponse>>()
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].ciphertext, BASE64_STANDARD.encode(&ciphertext));
 }
