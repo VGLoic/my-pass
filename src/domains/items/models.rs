@@ -108,55 +108,18 @@ pub enum FindItemsError {
 
 #[cfg(test)]
 mod tests {
-    use fake::rand;
+    use fake::{Fake, faker};
 
-    use crate::crypto::keypair::{PrivateKey, SymmetricKey};
+    use crate::{crypto::keypair::PrivateKey, domains::items::testutil::EncryptedItem};
 
     use super::*;
-
-    // REMIND ME: duplicate
-    struct EncryptedItem {
-        ciphertext: Vec<u8>,
-        encryption_nonce: [u8; 12],
-        ephemeral_public_key: [u8; 32],
-        signature_r: [u8; 32],
-        signature_s: [u8; 32],
-    }
-    impl EncryptedItem {
-        fn new(private_key: &PrivateKey) -> Result<Self, anyhow::Error> {
-            let plaintext: [u8; 32] = rand::random();
-            let encapsulated_symmetric_key =
-                SymmetricKey::encapsulate(&private_key.encapsulation_public_key()).map_err(
-                    |e| anyhow::anyhow!("{e}").context("failed to encrypt symmetric key for test"),
-                )?;
-            let encryption_nonce: [u8; 12] = rand::random();
-
-            let ciphertext = encapsulated_symmetric_key
-                .symmetric_key()
-                .encrypt(&plaintext, &encryption_nonce)
-                .map_err(|e| anyhow::anyhow!("{e}").context("failed to encrypt test plaintext"))?;
-
-            let (signature_r, signature_s) = private_key.sign(&ciphertext)?;
-
-            Ok(Self {
-                ciphertext,
-                encryption_nonce,
-                ephemeral_public_key: encapsulated_symmetric_key
-                    .ephemeral_public_key()
-                    .to_bytes()
-                    .unsafe_inner()
-                    .to_owned(),
-                signature_r,
-                signature_s,
-            })
-        }
-    }
 
     #[test]
     fn test_invalid_create_item_request_signature() {
         let private_key = PrivateKey::generate();
         let account_public_key = private_key.public_key();
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
 
         // Flip a bit in signature_r to make it invalid
         let mut invalid_signature_r = encrypted_item.signature_r;
@@ -182,7 +145,8 @@ mod tests {
     fn test_valid_create_item_request() {
         let private_key = PrivateKey::generate();
         let account_public_key = private_key.public_key();
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
 
         let result = CreateItemRequest::new(
             uuid::Uuid::new_v4(),

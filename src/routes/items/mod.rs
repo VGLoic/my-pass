@@ -218,48 +218,10 @@ impl From<Item> for ItemResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::accounts::testutil::fake_account;
-    use fake::rand;
+    use crate::domains::{accounts::testutil::fake_account, items::testutil::EncryptedItem};
+    use fake::{Fake, faker};
 
-    use crate::crypto::keypair::{PrivateKey, SymmetricKey};
-
-    // REMIND ME: duplicate
-    struct EncryptedItem {
-        ciphertext: Vec<u8>,
-        encryption_nonce: [u8; 12],
-        ephemeral_public_key: [u8; 32],
-        signature_r: [u8; 32],
-        signature_s: [u8; 32],
-    }
-    impl EncryptedItem {
-        fn new(private_key: &PrivateKey) -> Result<Self, anyhow::Error> {
-            let plaintext: [u8; 32] = rand::random();
-            let encapsulated_symmetric_key =
-                SymmetricKey::encapsulate(&private_key.encapsulation_public_key()).map_err(
-                    |e| anyhow::anyhow!("{e}").context("failed to encrypt symmetric key for test"),
-                )?;
-            let encryption_nonce: [u8; 12] = rand::random();
-
-            let ciphertext = encapsulated_symmetric_key
-                .symmetric_key()
-                .encrypt(&plaintext, &encryption_nonce)
-                .map_err(|e| anyhow::anyhow!("{e}").context("failed to encrypt test plaintext"))?;
-
-            let (signature_r, signature_s) = private_key.sign(&ciphertext)?;
-
-            Ok(Self {
-                ciphertext,
-                encryption_nonce,
-                ephemeral_public_key: encapsulated_symmetric_key
-                    .ephemeral_public_key()
-                    .to_bytes()
-                    .unsafe_inner()
-                    .to_owned(),
-                signature_r,
-                signature_s,
-            })
-        }
-    }
+    use crate::crypto::keypair::PrivateKey;
 
     // ################ CREATE ITEM TESTS ################
 
@@ -269,7 +231,8 @@ mod tests {
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
 
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
             encryption_nonce: Opaque::new(BASE64_STANDARD.encode(encrypted_item.encryption_nonce)),
@@ -296,7 +259,8 @@ mod tests {
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
 
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
         let bad_ciphertext = "!!!invalid_base64!!!";
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(bad_ciphertext.to_string()),
@@ -326,7 +290,8 @@ mod tests {
         let private_key = PrivateKey::generate();
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
         let bad_encryption_nonce = "!!!invalid_base64!!!";
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
@@ -356,7 +321,8 @@ mod tests {
         let private_key = PrivateKey::generate();
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
         let bad_encryption_nonce = BASE64_STANDARD.encode([0u8; 10]); // should be 12 bytes
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
@@ -386,7 +352,8 @@ mod tests {
         let private_key = PrivateKey::generate();
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
         let bad_ephemeral_public_key = "!!!invalid_base64!!!";
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
@@ -414,7 +381,8 @@ mod tests {
         let private_key = PrivateKey::generate();
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
         let bad_ephemeral_public_key = BASE64_STANDARD.encode([0u8; 10]); // should be 32 bytes
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
@@ -442,7 +410,8 @@ mod tests {
         let private_key = PrivateKey::generate();
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
         let bad_signature = "!!!invalid_base64!!!";
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
@@ -464,7 +433,8 @@ mod tests {
         let private_key = PrivateKey::generate();
         let mut account = fake_account();
         account.public_key = private_key.public_key().to_bytes();
-        let encrypted_item = EncryptedItem::new(&private_key).unwrap();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
         let bad_signature = BASE64_STANDARD.encode([0u8; 10]); // should be 64 bytes
         let request_body = CreateItemRequestHttpBody {
             ciphertext: Opaque::new(BASE64_STANDARD.encode(encrypted_item.ciphertext)),
