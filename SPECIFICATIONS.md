@@ -196,9 +196,11 @@ Handler logic:
 **Client Side:**
 - The user must be logged in,
 - The client encrypts the item data before sending it to the server:
-    1. Use x25519 to derive an ephemeral key pair and a shared secret from the user's private key and the user's public key, the shared secret is used as the basis for asymmetric encryption,
+    1. Uses X25519 in order to derive a shared secret:
+        - Generates an ephemeral X25519 key pair,
+        - Uses X25519 key agreement with the ephemeral private key and the user's public key,
     2. Generates a random nonce for AES-256-GCM,
-    3. Symmetrically encrypts the item data using AES-256-GCM with the shared secret and the generated nonce, result is `ciphertext`,
+    3. Symmetrically encrypts the item data using AES-256-GCM with the shared secret (used as the symmetric key) and the generated nonce, result is `ciphertext`,
     4. Signs the ciphertext using Ed25519, result is `signature`,
 - The client sends the signature, the ciphertext, the nonce and the ephemeral public key to the server using the endpoint described below.
 
