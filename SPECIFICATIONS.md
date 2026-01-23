@@ -26,7 +26,7 @@ MyPass is a password management application designed to securely store and manag
 
 - Password and key derivation: Argon2id,
 - Symmetric encryption (with authentication): AES-256-GCM,
-- Asymetric signature: Ed25519,
+- Asymmetric signature: Ed25519,
 - Asymmetric key agreement: X25519,
 - Token-based authentication: JWT with HMAC-SHA-256.
 
