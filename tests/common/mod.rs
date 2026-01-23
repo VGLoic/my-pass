@@ -89,11 +89,18 @@ pub async fn setup_instance(
     };
 
     let accounts_repository =
-        my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool);
+        my_pass::domains::accounts::repository::PsqlAccountsRepository::new(pool.clone());
     let accounts_notifier = FakeAccountsNotifier::new();
     let accounts_service = my_pass::domains::accounts::service::DefaultAccountsService::new(
         accounts_repository,
         accounts_notifier.clone(),
+    );
+
+    let items_repository = my_pass::domains::items::repository::PsqlItemsRepository::new(pool);
+    let items_notifier = my_pass::domains::items::notifier::DummyItemsNotifier;
+    let items_service = my_pass::domains::items::service::DefaultItemsService::new(
+        items_repository,
+        items_notifier,
     );
 
     let listener = if config.port == 0 {
@@ -112,7 +119,7 @@ pub async fn setup_instance(
     );
 
     tokio::spawn(async move {
-        serve_http_server(listener, secrets_manager, accounts_service)
+        serve_http_server(listener, secrets_manager, accounts_service, items_service)
             .await
             .unwrap()
     });

@@ -26,8 +26,9 @@ MyPass is a password management application designed to securely store and manag
 
 - Password and key derivation: Argon2id,
 - Symmetric encryption (with authentication): AES-256-GCM,
-- Message authentication: HMAC-SHA-256,
-- Asymmetric encryption: Ed25519 curve with EdDSA signature scheme.
+- Asymmetric signature: Ed25519,
+- Asymmetric key agreement: X25519,
+- Token-based authentication: JWT with HMAC-SHA-256.
 
 ## Implementation of the user stories
 
@@ -195,25 +196,22 @@ Handler logic:
 **Client Side:**
 - The user must be logged in,
 - The client encrypts the item data before sending it to the server:
-    1. Derives a shared using X25519 key exchange between an ephemeral key pair and the user's public key:
-        1. Generates a random Ed25519 secret key,
-        2. Generates the corresponding ephemeral public key,
-        3. Computes the shared key as: shared key = secret * user's public key,
-    2. Hashes the shared key `x` coordinate using SHA3-256,
-    3. Generates a random key derivation salt,
-    4. Uses Argon2id to derive a symmetric key from the hashed shared key and the salt,
-    5. Symmetrically encrypts the item data using AES-256-GCM with the derived symmetric key,
-- The client signes the ciphertext using the Ed25519 secret key,
-- The client sends the signature, the cyphertext, ephemeral public key and key derivation salt to the server using the endpoint described below.
+    1. Uses X25519 in order to derive a shared secret:
+        - Generates an ephemeral X25519 key pair,
+        - Uses X25519 key agreement with the ephemeral private key and the user's public key,
+    2. Generates a random nonce for AES-256-GCM,
+    3. Symmetrically encrypts the item data using AES-256-GCM with the shared secret (used as the symmetric key) and the generated nonce, result is `ciphertext`,
+    4. Signs the ciphertext using Ed25519, result is `signature`,
+- The client sends the signature, the ciphertext, the nonce and the ephemeral public key to the server using the endpoint described below.
 
 **Server Side:**
-Endpoint: `POST /api/accounts/items` with Authorization header and request body:
+Endpoint: `POST /api/items` with Authorization header and request body:
 ```Authorization: Bearer <jwt_access_token>```
 ```json
 {
   "ciphertext": "<item_ciphertext>",
-  "ephemeralPublicKey": "<ephemeral_public_key>",
-  "keyDerivationSalt": "<key_derivation_salt>",
+  "encryptionNonce": "<item_encryption_nonce>",
+  "ephemeralPublicKey": "<item_ephemeral_public_key>",
   "signature": "<item_signature>"
 }
 ```
@@ -221,7 +219,6 @@ Endpoint: `POST /api/accounts/items` with Authorization header and request body:
 Handler logic:
 1. Validate the JWT access token,
 2. Retrieve the account associated with the token from the database,
-3. Validate the ciphertext, ephemeral public key and key derivation salt format,
-3. Validate the signature using the account public key,
-4. Store in database:
-    - the item with ciphertext, ephemeral public key, key derivation salt, associated with the account.
+3. Validate the ciphertext, encryption nonce, ephemeral public key and signature format,
+4. Verify the signature of the ciphertext using the user's public key,
+5. Store in database the new item associated with the user's account containing the ciphertext, encryption nonce, and ephemeral public key.

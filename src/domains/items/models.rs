@@ -1,0 +1,185 @@
+// ###############################################
+// ############### ITEM DEFINITION ###############
+// ###############################################
+
+use sqlx::prelude::FromRow;
+use thiserror::Error;
+
+use crate::{crypto::keypair::PublicKey, newtypes::Opaque};
+
+#[derive(Debug, Clone, FromRow)]
+pub struct Item {
+    pub id: uuid::Uuid,
+    pub account_id: uuid::Uuid,
+    pub ciphertext: Opaque<Vec<u8>>,
+    pub encryption_nonce: Opaque<[u8; 12]>,
+    pub ephemeral_public_key: Opaque<Vec<u8>>,
+    pub signature_r: Opaque<[u8; 32]>,
+    pub signature_s: Opaque<[u8; 32]>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+// ###########################################
+// ############### CREATE ITEM ###############
+// ###########################################
+
+pub struct CreateItemRequest {
+    account_id: uuid::Uuid,
+    ciphertext: Opaque<Vec<u8>>,
+    encryption_nonce: Opaque<[u8; 12]>,
+    ephemeral_public_key: PublicKey,
+    signature_r: Opaque<[u8; 32]>,
+    signature_s: Opaque<[u8; 32]>,
+}
+
+#[derive(Debug, Error)]
+pub enum CreateItemRequestError {
+    #[error("Invalid signature")]
+    InvalidSignature,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+impl CreateItemRequest {
+    pub fn new(
+        account_id: uuid::Uuid,
+        account_public_key: Opaque<[u8; 32]>,
+        ciphertext: Opaque<Vec<u8>>,
+        encryption_nonce: Opaque<[u8; 12]>,
+        ephemeral_public_key: PublicKey,
+        signature_r: Opaque<[u8; 32]>,
+        signature_s: Opaque<[u8; 32]>,
+    ) -> Result<Self, CreateItemRequestError> {
+        PublicKey::new(account_public_key)
+            .verify_signature(&ciphertext, &signature_r, &signature_s)
+            .map_err(|_| CreateItemRequestError::InvalidSignature)?;
+
+        Ok(Self {
+            account_id,
+            ciphertext,
+            encryption_nonce,
+            ephemeral_public_key,
+            signature_r,
+            signature_s,
+        })
+    }
+
+    pub fn account_id(&self) -> uuid::Uuid {
+        self.account_id
+    }
+
+    pub fn ciphertext(&self) -> &Opaque<Vec<u8>> {
+        &self.ciphertext
+    }
+    pub fn encryption_nonce(&self) -> &Opaque<[u8; 12]> {
+        &self.encryption_nonce
+    }
+    pub fn ephemeral_public_key(&self) -> &PublicKey {
+        &self.ephemeral_public_key
+    }
+    pub fn signature_r(&self) -> &Opaque<[u8; 32]> {
+        &self.signature_r
+    }
+    pub fn signature_s(&self) -> &Opaque<[u8; 32]> {
+        &self.signature_s
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum CreateItemError {
+    #[error("Account not found")]
+    AccountNotFound,
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+// ##############################################
+// ############### ITEM RETRIEVAL ###############
+// ##############################################
+
+#[derive(Debug, Error)]
+pub enum FindItemsError {
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use fake::{Fake, faker};
+
+    use crate::{crypto::keypair::PrivateKey, domains::items::testutil::EncryptedItem};
+
+    use super::*;
+
+    #[test]
+    fn test_invalid_create_item_request_signature() {
+        let private_key = PrivateKey::generate();
+        let account_public_key = private_key.public_key();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
+
+        // Flip a bit in signature_r to make it invalid
+        let mut invalid_signature_r = encrypted_item.signature_r;
+        invalid_signature_r[0] ^= 0x01;
+
+        let result = CreateItemRequest::new(
+            uuid::Uuid::new_v4(),
+            account_public_key.to_bytes(),
+            Opaque::new(encrypted_item.ciphertext),
+            Opaque::new(encrypted_item.encryption_nonce),
+            PublicKey::new(encrypted_item.ephemeral_public_key.into()),
+            Opaque::new(invalid_signature_r),
+            Opaque::new(encrypted_item.signature_s),
+        );
+
+        assert!(matches!(
+            result,
+            Err(CreateItemRequestError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn test_valid_create_item_request() {
+        let private_key = PrivateKey::generate();
+        let account_public_key = private_key.public_key();
+        let item_plaintext: String = faker::lorem::en::Sentence(3..6).fake();
+        let encrypted_item = EncryptedItem::new(item_plaintext.as_bytes(), &private_key).unwrap();
+
+        let result = CreateItemRequest::new(
+            uuid::Uuid::new_v4(),
+            account_public_key.to_bytes(),
+            Opaque::new(encrypted_item.ciphertext.clone()),
+            Opaque::new(encrypted_item.encryption_nonce),
+            PublicKey::new(encrypted_item.ephemeral_public_key.into()),
+            Opaque::new(encrypted_item.signature_r),
+            Opaque::new(encrypted_item.signature_s),
+        );
+
+        assert!(result.is_ok());
+        let create_item_request = result.unwrap();
+        assert_eq!(
+            create_item_request.ciphertext().unsafe_inner(),
+            &encrypted_item.ciphertext
+        );
+        assert_eq!(
+            create_item_request.encryption_nonce().unsafe_inner(),
+            &encrypted_item.encryption_nonce
+        );
+        assert_eq!(
+            create_item_request
+                .ephemeral_public_key()
+                .to_bytes()
+                .unsafe_inner(),
+            &encrypted_item.ephemeral_public_key
+        );
+        assert_eq!(
+            create_item_request.signature_r().unsafe_inner(),
+            &encrypted_item.signature_r
+        );
+        assert_eq!(
+            create_item_request.signature_s().unsafe_inner(),
+            &encrypted_item.signature_s
+        );
+    }
+}

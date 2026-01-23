@@ -15,7 +15,6 @@ use thiserror::Error;
 pub struct Account {
     pub id: uuid::Uuid,
     pub email: Email,
-    #[allow(dead_code)]
     pub password_hash: Opaque<String>,
     pub verified: bool,
     pub private_key_symmetric_key_salt: Opaque<[u8; 16]>,
@@ -360,7 +359,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        crypto::keypair::KeyPair,
+        crypto::keypair::PrivateKey,
         domains::accounts::testutil::{fake_account, fake_verification_ticket},
     };
 
@@ -371,8 +370,10 @@ mod tests {
         let email: Email = Faker.fake();
         let password: Password = Faker.fake();
 
-        let key_pair = KeyPair::generate();
-        let encrypted_key_pair = key_pair.encrypt(password.clone()).unwrap();
+        let private_key = PrivateKey::generate();
+        let encrypted_key_pair = private_key
+            .encrypt_key_pair_with_password(password.clone())
+            .unwrap();
 
         let result = SignupRequest::new(email.clone(), encrypted_key_pair.clone());
         assert!(result.is_ok());

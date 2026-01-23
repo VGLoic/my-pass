@@ -1,5 +1,5 @@
 use crate::{
-    crypto::keypair::{EncryptedKeyPair, KeyPair},
+    crypto::keypair::{EncryptedKeyPair, PrivateKey},
     newtypes::{Email, EmailError, Opaque, Password, PasswordError},
     secrets,
 };
@@ -194,8 +194,10 @@ impl<T> Dummy<T> for SignUpRequestHttpBody {
         let email: Email = Faker.fake_with_rng(rng);
         let password: Password = Faker.fake_with_rng(rng);
 
-        let key_pair = KeyPair::generate();
-        let encrypted_key_pair = key_pair.encrypt(password.clone()).unwrap();
+        let private_key = PrivateKey::generate();
+        let encrypted_key_pair = private_key
+            .encrypt_key_pair_with_password(password.clone())
+            .unwrap();
 
         SignUpRequestHttpBody {
             email: email.to_string(),
