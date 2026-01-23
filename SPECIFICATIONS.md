@@ -203,7 +203,7 @@ Handler logic:
 - The client sends the signature, the ciphertext, the nonce and the ephemeral public key to the server using the endpoint described below.
 
 **Server Side:**
-Endpoint: `POST /api/accounts/items` with Authorization header and request body:
+Endpoint: `POST /api/items` with Authorization header and request body:
 ```Authorization: Bearer <jwt_access_token>```
 ```json
 {
