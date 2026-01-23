@@ -26,9 +26,9 @@ MyPass is a password management application designed to securely store and manag
 
 - Password and key derivation: Argon2id,
 - Symmetric encryption (with authentication): AES-256-GCM,
-- Message authentication: HMAC-SHA-256,
 - Asymetric signature: Ed25519,
-- Asymetric encryption: scalar multiplication on Curve25519.
+- Asymmetric key agreement: X25519,
+- Token-based authentication: JWT with HMAC-SHA-256.
 
 ## Implementation of the user stories
 
@@ -195,15 +195,12 @@ Handler logic:
 
 **Client Side:**
 - The user must be logged in,
-REMIND ME to update
 - The client encrypts the item data before sending it to the server:
-    1. Generates a random symmetric encryption key for the item,
+    1. Use x25519 to derive an ephemeral key pair and a shared secret from the user's private key and the user's public key, the shared secret is used as the basis for asymmetric encryption,
     2. Generates a random nonce for AES-256-GCM,
-    3. Symmetrically encrypts the item data using AES-256-GCM with the generated symmetric key and nonce, result is `ciphertext`,
-    4. Derives the user's public key from the user's Ed25519 key pair stored on the client,
-    5. Encrypts the symmetric encryption key using curve 25519 asymmetric encryption with the user's public key, result is `encryptedSymmetricKey`.
-    6. Signs the ciphertext using Ed25519, result is `signature`,
-- The client sends the signature, the ciphertext, the nonce and the encrypted symmetric key to the server using the endpoint described below.
+    3. Symmetrically encrypts the item data using AES-256-GCM with the shared secret and the generated nonce, result is `ciphertext`,
+    4. Signs the ciphertext using Ed25519, result is `signature`,
+- The client sends the signature, the ciphertext, the nonce and the ephemeral public key to the server using the endpoint described below.
 
 **Server Side:**
 Endpoint: `POST /api/accounts/items` with Authorization header and request body:
@@ -220,6 +217,6 @@ Endpoint: `POST /api/accounts/items` with Authorization header and request body:
 Handler logic:
 1. Validate the JWT access token,
 2. Retrieve the account associated with the token from the database,
-3. Validate the ciphertext, encryption nonce, encrypted symmetric key and signature format,
+3. Validate the ciphertext, encryption nonce, ephemeral public key and signature format,
 4. Verify the signature of the ciphertext using the user's public key,
-5. Store in database the new item associated with the user's account containing the ciphertext, encryption nonce, and encrypted symmetric key.
+5. Store in database the new item associated with the user's account containing the ciphertext, encryption nonce, and ephemeral public key.
