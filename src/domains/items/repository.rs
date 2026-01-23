@@ -14,7 +14,6 @@ pub trait ItemsRepository: Send + Sync + 'static {
     /// A Result containing a vector of Item structs, ordered by creation date descending
     ///
     /// # Errors
-    /// MUST return FindItemsError::AccountNotFound if the account does not exist.
     /// MUST return FindItemsError::Unknown for any other errors encountered during the operation.
     async fn find_items_by_account_id(
         &self,
@@ -71,13 +70,9 @@ impl ItemsRepository for PsqlItemsRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
-            if let sqlx::Error::RowNotFound = e {
-                FindItemsError::AccountNotFound
-            } else {
-                FindItemsError::Unknown(
-                    anyhow::Error::new(e).context("failed to find items by account ID"),
-                )
-            }
+            FindItemsError::Unknown(
+                anyhow::Error::new(e).context("failed to find items by account ID"),
+            )
         })?;
 
         Ok(items)

@@ -100,8 +100,6 @@ pub enum CreateItemError {
 
 #[derive(Debug, Error)]
 pub enum FindItemsError {
-    #[error("Account not found")]
-    AccountNotFound,
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
 }

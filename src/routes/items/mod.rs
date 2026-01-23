@@ -167,7 +167,6 @@ async fn list_items(
         .find_items_by_account_id(authorized_account.account_id)
         .await
         .map_err(|e| match e {
-            FindItemsError::AccountNotFound => ApiError::NotFound,
             FindItemsError::Unknown(e) => {
                 ApiError::InternalServerError(e.context("failed to list items"))
             }
