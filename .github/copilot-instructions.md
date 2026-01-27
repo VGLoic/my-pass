@@ -17,7 +17,7 @@ cargo fmt
 ### Linting and Code Analysis
 All code must pass linting checks using:
 ```bash
-cargo clippy --all-targets --all-features --workspace
+cargo clippy --all-targets --all-features
 ```
 
 ### Testing
