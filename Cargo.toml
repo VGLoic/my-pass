@@ -1,7 +1,15 @@
+[workspace]
+members = [".", "cli"]
+resolver = "2"
+
 [package]
 name = "my-pass"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+name = "my_pass"
+path = "src/lib.rs"
 
 [dependencies]
 aes-gcm = "0.10.3"
