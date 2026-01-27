@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use clap::{Parser, Subcommand};
-use my_pass::cli::{client::ApiClient, config::Config, tokenstore::KeyringTokenStore};
+use my_pass::cli::{client::CliClient, config::Config, tokenstore::KeyringTokenStore};
 use my_pass::newtypes::{Email, EmailError};
 
 mod output;
@@ -93,20 +93,20 @@ fn main() -> Result<(), CliError> {
     let config = Config::from_env();
     let output = Output::new(cli.json);
     let tokens = KeyringTokenStore;
-    let api_client = ApiClient::new(&config, tokens)?;
+    let cli_client = CliClient::new(&config, tokens)?;
 
     let result: Result<(), CliError> = match cli.command {
         Commands::Account(account_cmd) => match account_cmd {
             AccountCommands::Signup { email } => {
                 let email = parse_email(&email)?;
                 let password = prompt_password("Password: ")?;
-                api_client.signup(email, password)?;
+                cli_client.signup(email, password)?;
                 output.success(&"Signup successful. Check your email for the verification token.");
                 Ok(())
             }
             AccountCommands::Verify { email, token } => {
                 let email = parse_email(&email)?;
-                api_client.verify(email, token)?;
+                cli_client.verify(email, token)?;
                 output.success(&"Verification successful. You can now log in.");
                 Ok(())
             }

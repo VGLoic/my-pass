@@ -21,8 +21,8 @@ use reqwest::{
 };
 use thiserror::Error;
 
-/// API client wrapper with token management and request ID extraction
-pub struct ApiClient<T: TokenStore> {
+/// CLI client wrapper with token management and request ID extraction
+pub struct CliClient<T: TokenStore> {
     base_url: Url,
     http: Client,
     #[allow(dead_code)]
@@ -41,7 +41,7 @@ pub enum CliClientError {
     Unknown(#[from] anyhow::Error),
 }
 
-impl<T: TokenStore> ApiClient<T> {
+impl<T: TokenStore> CliClient<T> {
     pub fn new(config: &Config, tokens: T) -> Result<Self, CliClientError> {
         let base_url = Url::parse(config.server_url()).context("Invalid server URL")?;
 
@@ -58,7 +58,7 @@ impl<T: TokenStore> ApiClient<T> {
     }
 
     /// Build a full URL from a path (e.g., "/api/accounts/me")
-    pub fn url(&self, path: &str) -> anyhow::Result<Url> {
+    fn url(&self, path: &str) -> anyhow::Result<Url> {
         self.base_url
             .join(path)
             .map_err(|e| anyhow!(e))
@@ -66,7 +66,7 @@ impl<T: TokenStore> ApiClient<T> {
     }
 
     /// Extract request ID from response headers
-    pub fn request_id(headers: &HeaderMap) -> Option<String> {
+    fn request_id(headers: &HeaderMap) -> Option<String> {
         headers
             .get("x-request-id")
             .and_then(|v: &HeaderValue| v.to_str().ok())
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn test_url_builder() {
         let config = Config::with_server_url("http://localhost:3000");
-        let client = ApiClient::new(&config, MemoryTokenStore::new()).unwrap();
+        let client = CliClient::new(&config, MemoryTokenStore::new()).unwrap();
         let url = client.url("/api/accounts/me").unwrap();
         assert_eq!(url.as_str(), "http://localhost:3000/api/accounts/me");
     }
@@ -204,7 +204,7 @@ mod tests {
     fn test_request_id_extraction() {
         let mut headers = HeaderMap::new();
         headers.insert("x-request-id", "abc-123".parse().unwrap());
-        let request_id = ApiClient::<MemoryTokenStore>::request_id(&headers);
+        let request_id = CliClient::<MemoryTokenStore>::request_id(&headers);
         assert_eq!(request_id.as_deref(), Some("abc-123"));
     }
 
