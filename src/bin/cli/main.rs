@@ -1,15 +1,14 @@
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
-
-mod client;
-mod config;
-mod output;
-mod password;
-
-use client::{ApiClient, KeyringTokenStore};
-use config::Config;
+use my_pass::cli::{
+    client::{ApiClient, KeyringTokenStore},
+    config::Config,
+};
 use my_pass::newtypes::{Email, EmailError};
-use output::CliError;
-use output::Output;
+
+mod output;
+use output::{CliError, Output};
+mod password;
 use password::prompt_password;
 
 #[derive(Parser)]
@@ -159,8 +158,10 @@ async fn main() -> Result<(), CliError> {
 }
 
 fn parse_email(raw: &str) -> Result<Email, CliError> {
-    Email::new(raw).map_err(|e| match e {
-        EmailError::Empty => CliError::new("Email cannot be empty"),
-        EmailError::InvalidFormat => CliError::new("Email format is invalid"),
-    })
+    Email::new(raw)
+        .map_err(|e| match e {
+            EmailError::Empty => anyhow!("Email cannot be empty"),
+            EmailError::InvalidFormat => anyhow!("Email format is invalid"),
+        })
+        .map_err(CliError::from)
 }
