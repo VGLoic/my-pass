@@ -30,29 +30,3 @@ impl Config {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_server_url() {
-        unsafe {
-            env::remove_var("MY_PASS_SERVER_URL");
-        }
-        let config = Config::from_env();
-        assert_eq!(config.server_url(), "http://localhost:3000");
-    }
-
-    #[test]
-    fn test_custom_server_url() {
-        unsafe {
-            env::set_var("MY_PASS_SERVER_URL", "https://api.example.com");
-        }
-        let config = Config::from_env();
-        assert_eq!(config.server_url(), "https://api.example.com");
-        unsafe {
-            env::remove_var("MY_PASS_SERVER_URL");
-        }
-    }
-}

@@ -7,7 +7,10 @@ mod password;
 
 use client::{ApiClient, KeyringTokenStore};
 use config::Config;
+use my_pass::newtypes::{Email, EmailError};
+use output::CliError;
 use output::Output;
+use password::prompt_password;
 
 #[derive(Parser)]
 #[command(name = "mypass")]
@@ -87,29 +90,29 @@ enum ItemCommands {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), CliError> {
     // Initialize tracing for logging
     tracing_subscriber::fmt::init();
 
     let cli = Cli::parse();
     let config = Config::from_env();
     let output = Output::new(cli.json);
-    let _ = config.server_url();
     let tokens = KeyringTokenStore;
-    let _api_client = ApiClient::new(&config, tokens)?;
+    let api_client = ApiClient::new(&config, tokens)?;
 
-    let result: anyhow::Result<()> = match cli.command {
+    let result: Result<(), CliError> = match cli.command {
         Commands::Account(account_cmd) => match account_cmd {
             AccountCommands::Signup { email } => {
-                let _config = &config;
-                let _output = &output;
-                println!("Signup command: {}", email);
-                println!("Not yet implemented");
+                let email = parse_email(&email)?;
+                let password = prompt_password("Password: ")?;
+                api_client.signup(email, password).await?;
+                output.success(&"Signup successful. Check your email for the verification token.");
                 Ok(())
             }
             AccountCommands::Verify { email, token } => {
-                println!("Verify command: {} {}", email, token);
-                println!("Not yet implemented");
+                let email = parse_email(&email)?;
+                api_client.verify(email, token).await?;
+                output.success(&"Verification successful. You can now log in.");
                 Ok(())
             }
             AccountCommands::Login { email } => {
@@ -148,10 +151,16 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if let Err(e) = result {
-        let cli_error = output::CliError::from(e);
-        output.error(&cli_error);
+        output.error(&e);
         std::process::exit(1);
     }
 
     Ok(())
+}
+
+fn parse_email(raw: &str) -> Result<Email, CliError> {
+    Email::new(raw).map_err(|e| match e {
+        EmailError::Empty => CliError::new("Email cannot be empty"),
+        EmailError::InvalidFormat => CliError::new("Email format is invalid"),
+    })
 }

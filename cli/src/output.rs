@@ -7,13 +7,11 @@ pub struct Output {
 }
 
 impl Output {
-    #[allow(dead_code)]
     pub fn new(json_mode: bool) -> Self {
         Self { json_mode }
     }
 
     /// Print a success message
-    #[allow(dead_code)]
     pub fn success<T: Serialize + fmt::Display>(&self, data: &T) {
         if self.json_mode {
             self.print_json(data);
@@ -57,29 +55,18 @@ struct ErrorOutput {
 pub struct CliError {
     message: String,
     request_id: Option<String>,
-    #[allow(dead_code)]
-    source: Option<anyhow::Error>,
 }
 
 impl CliError {
-    #[allow(dead_code)]
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             request_id: None,
-            source: None,
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
         self.request_id = Some(request_id.into());
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn with_source(mut self, source: anyhow::Error) -> Self {
-        self.source = Some(source);
         self
     }
 
@@ -105,18 +92,13 @@ impl From<anyhow::Error> for CliError {
         Self {
             message: err.to_string(),
             request_id: None,
-            source: Some(err),
         }
     }
 }
 
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
-        Self {
-            message: format!("HTTP request failed: {}", err),
-            request_id: None,
-            source: Some(err.into()),
-        }
+        CliError::new(format!("HTTP error: {err}"))
     }
 }
 

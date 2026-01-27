@@ -4,13 +4,20 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use crate::{config::Config, output::CliError};
 use anyhow::{Context, anyhow};
+use base64::{Engine, prelude::BASE64_STANDARD};
+use my_pass::{
+    crypto::keypair::PrivateKey,
+    newtypes::{Email, Opaque, Password},
+    routes::accounts::{
+        EncryptedKeyPairHttpBody, SignUpRequestHttpBody, UseVerificationTicketRequestHttpBody,
+    },
+};
 use reqwest::{
     Client, Url,
     header::{HeaderMap, HeaderValue},
 };
-
-use crate::config::Config;
 
 #[allow(dead_code)]
 pub const KEYRING_SERVICE: &str = "my-pass-cli";
@@ -63,22 +70,24 @@ impl TokenStore for KeyringTokenStore {
 }
 
 /// API client wrapper with token management and request ID extraction
-#[allow(dead_code)]
 pub struct ApiClient<T: TokenStore> {
     base_url: Url,
     http: Client,
+    #[allow(dead_code)]
     tokens: T,
 }
 
 impl<T: TokenStore> ApiClient<T> {
-    #[allow(dead_code)]
-    pub fn new(config: &Config, tokens: T) -> anyhow::Result<Self> {
-        let base_url = Url::parse(config.server_url()).context("Invalid server URL")?;
+    pub fn new(config: &Config, tokens: T) -> Result<Self, CliError> {
+        let base_url = Url::parse(config.server_url())
+            .context("Invalid server URL")
+            .map_err(CliError::from)?;
 
         let http = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
-            .context("Failed to build HTTP client")?;
+            .context("Failed to build HTTP client")
+            .map_err(CliError::from)?;
 
         Ok(Self {
             base_url,
@@ -88,7 +97,6 @@ impl<T: TokenStore> ApiClient<T> {
     }
 
     /// Build a full URL from a path (e.g., "/api/accounts/me")
-    #[allow(dead_code)]
     pub fn url(&self, path: &str) -> anyhow::Result<Url> {
         self.base_url
             .join(path)
@@ -97,7 +105,6 @@ impl<T: TokenStore> ApiClient<T> {
     }
 
     /// Extract request ID from response headers
-    #[allow(dead_code)]
     pub fn request_id(headers: &HeaderMap) -> Option<String> {
         headers
             .get("x-request-id")
@@ -105,15 +112,101 @@ impl<T: TokenStore> ApiClient<T> {
             .map(str::to_string)
     }
 
-    #[allow(dead_code)]
-    pub fn http(&self) -> &Client {
-        &self.http
+    /// Sign up a new account by generating an encrypted key pair and sending it to the server
+    pub async fn signup(&self, email: Email, password: Password) -> Result<(), CliError> {
+        let private_key = PrivateKey::generate();
+        let encrypted_key_pair = private_key
+            .encrypt_key_pair_with_password(password.clone())
+            .context("failed to encrypt key pair with password")
+            .map_err(CliError::from)?;
+
+        let payload = SignUpRequestHttpBody {
+            email: email.as_str().to_string(),
+            password: password.unsafe_inner().to_owned().into(),
+            encrypted_key_pair: EncryptedKeyPairHttpBody {
+                symmetric_key_salt: BASE64_STANDARD
+                    .encode(encrypted_key_pair.symmetric_key_salt().unsafe_inner())
+                    .into(),
+                encryption_nonce: BASE64_STANDARD
+                    .encode(encrypted_key_pair.encryption_nonce().unsafe_inner())
+                    .into(),
+                ciphertext: BASE64_STANDARD
+                    .encode(encrypted_key_pair.ciphertext().unsafe_inner())
+                    .into(),
+                public_key: BASE64_STANDARD
+                    .encode(encrypted_key_pair.public_key().unsafe_inner())
+                    .into(),
+            },
+        };
+        let url = self.url("/api/accounts/signup")?;
+
+        let response = self
+            .http
+            .post(url)
+            .json(&payload)
+            .send()
+            .await
+            .context("failed to execute signup request")
+            .map_err(CliError::from)?;
+
+        if response.status().is_success() {
+            self.tokens.clear(email.as_str()).map_err(CliError::from)?;
+            return Ok(());
+        }
+
+        let status = response.status();
+        let request_id = Self::request_id(response.headers());
+        let body = response.text().await.unwrap_or_default();
+        Err(http_error_with_request_id(
+            format!("signup failed ({status})"),
+            body,
+            request_id,
+        ))
     }
 
-    #[allow(dead_code)]
-    pub fn tokens(&self) -> &T {
-        &self.tokens
+    /// Verify an account using the email and verification token
+    pub async fn verify(&self, email: Email, token: String) -> Result<(), CliError> {
+        let payload = UseVerificationTicketRequestHttpBody {
+            email: email.as_str().to_string(),
+            token: Opaque::from(token),
+        };
+        let url = self.url("/api/accounts/verification-tickets/use")?;
+
+        let response = self
+            .http
+            .post(url)
+            .json(&payload)
+            .send()
+            .await
+            .context("failed to execute verification request")
+            .map_err(CliError::from)?;
+
+        if response.status().is_success() {
+            self.tokens.clear(email.as_str()).map_err(CliError::from)?;
+            return Ok(());
+        }
+
+        let status = response.status();
+        let request_id = Self::request_id(response.headers());
+        let body = response.text().await.unwrap_or_default();
+        Err(http_error_with_request_id(
+            format!("verification failed ({status})"),
+            body,
+            request_id,
+        ))
     }
+}
+
+fn http_error_with_request_id(
+    message: String,
+    body: String,
+    request_id: Option<String>,
+) -> CliError {
+    let mut err = CliError::new(format!("{message}: {body}"));
+    if let Some(id) = request_id {
+        err = err.with_request_id(id);
+    }
+    err
 }
 
 #[cfg(test)]
