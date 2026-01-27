@@ -10,8 +10,8 @@ pub struct Config {
 impl Config {
     /// Load configuration from environment variables
     pub fn from_env() -> Self {
-        let server_url = env::var("MY_PASS_SERVER_URL")
-            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let server_url =
+            env::var("MY_PASS_SERVER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
         Self { server_url }
     }
@@ -23,12 +23,23 @@ impl Config {
 }
 
 #[cfg(test)]
+impl Config {
+    pub fn with_server_url(url: impl Into<String>) -> Self {
+        Self {
+            server_url: url.into(),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_default_server_url() {
-        unsafe { env::remove_var("MY_PASS_SERVER_URL"); }
+        unsafe {
+            env::remove_var("MY_PASS_SERVER_URL");
+        }
         let config = Config::from_env();
         assert_eq!(config.server_url(), "http://localhost:3000");
     }

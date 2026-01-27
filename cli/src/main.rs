@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
 
+mod client;
 mod config;
 mod output;
 mod password;
 
+use client::{ApiClient, KeyringTokenStore};
 use config::Config;
 use output::Output;
 
@@ -93,6 +95,8 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env();
     let output = Output::new(cli.json);
     let _ = config.server_url();
+    let tokens = KeyringTokenStore;
+    let _api_client = ApiClient::new(&config, tokens)?;
 
     let result: anyhow::Result<()> = match cli.command {
         Commands::Account(account_cmd) => match account_cmd {
