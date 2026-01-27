@@ -1,9 +1,6 @@
 use anyhow::anyhow;
 use clap::{Parser, Subcommand};
-use my_pass::cli::{
-    client::{ApiClient, KeyringTokenStore},
-    config::Config,
-};
+use my_pass::cli::{client::ApiClient, config::Config, tokenstore::KeyringTokenStore};
 use my_pass::newtypes::{Email, EmailError};
 
 mod output;
@@ -88,8 +85,7 @@ enum ItemCommands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<(), CliError> {
+fn main() -> Result<(), CliError> {
     // Initialize tracing for logging
     tracing_subscriber::fmt::init();
 
@@ -104,13 +100,13 @@ async fn main() -> Result<(), CliError> {
             AccountCommands::Signup { email } => {
                 let email = parse_email(&email)?;
                 let password = prompt_password("Password: ")?;
-                api_client.signup(email, password).await?;
+                api_client.signup(email, password)?;
                 output.success(&"Signup successful. Check your email for the verification token.");
                 Ok(())
             }
             AccountCommands::Verify { email, token } => {
                 let email = parse_email(&email)?;
-                api_client.verify(email, token).await?;
+                api_client.verify(email, token)?;
                 output.success(&"Verification successful. You can now log in.");
                 Ok(())
             }

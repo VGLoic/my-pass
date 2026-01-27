@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use super::config::Config;
+use super::{config::Config, tokenstore::TokenStore};
 use crate::{
     crypto::keypair::PrivateKey,
     newtypes::{Email, Opaque, Password},
@@ -15,60 +15,11 @@ use crate::{
 use anyhow::{Context, anyhow};
 use base64::{Engine, prelude::BASE64_STANDARD};
 use reqwest::{
-    Client, Url,
+    Url,
+    blocking::Client,
     header::{HeaderMap, HeaderValue},
 };
 use thiserror::Error;
-
-#[allow(dead_code)]
-pub const KEYRING_SERVICE: &str = "my-pass-cli";
-
-/// Abstraction for loading and storing JWTs
-#[allow(dead_code)]
-pub trait TokenStore: Send + Sync {
-    /// Retrieve a stored JWT for the given email, or `None` if missing/empty.
-    fn load(&self, email: &str) -> anyhow::Result<Option<String>>;
-
-    /// Persist a JWT for the given email in a secure backing store.
-    fn save(&self, email: &str, token: &str) -> anyhow::Result<()>;
-
-    /// Remove any stored JWT for the given email.
-    fn clear(&self, email: &str) -> anyhow::Result<()>;
-}
-
-/// Token storage backed by the OS keyring
-pub struct KeyringTokenStore;
-
-impl TokenStore for KeyringTokenStore {
-    fn load(&self, email: &str) -> anyhow::Result<Option<String>> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, email)
-            .context("Failed to access keyring entry")?;
-        match entry.get_password() {
-            Ok(token) if token.is_empty() => Ok(None),
-            Ok(token) => Ok(Some(token)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(anyhow!(e)).context("Failed to read token from keyring"),
-        }
-    }
-
-    fn save(&self, email: &str, token: &str) -> anyhow::Result<()> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, email)
-            .context("Failed to access keyring entry")?;
-        entry
-            .set_password(token)
-            .map_err(|e| anyhow!(e))
-            .context("Failed to write token to keyring")
-    }
-
-    fn clear(&self, email: &str) -> anyhow::Result<()> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, email)
-            .context("Failed to access keyring entry")?;
-        entry
-            .delete_credential()
-            .map_err(|e| anyhow!(e))
-            .context("Failed to delete token from keyring")
-    }
-}
 
 /// API client wrapper with token management and request ID extraction
 pub struct ApiClient<T: TokenStore> {
@@ -123,7 +74,7 @@ impl<T: TokenStore> ApiClient<T> {
     }
 
     /// Sign up a new account by generating an encrypted key pair and sending it to the server
-    pub async fn signup(&self, email: Email, password: Password) -> Result<(), CliClientError> {
+    pub fn signup(&self, email: Email, password: Password) -> Result<(), CliClientError> {
         let private_key = PrivateKey::generate();
         let encrypted_key_pair = private_key
             .encrypt_key_pair_with_password(password.clone())
@@ -154,7 +105,6 @@ impl<T: TokenStore> ApiClient<T> {
             .post(url)
             .json(&payload)
             .send()
-            .await
             .context("failed to execute signup request")?;
 
         if response.status().is_success() {
@@ -166,7 +116,7 @@ impl<T: TokenStore> ApiClient<T> {
 
         let status = response.status();
         let request_id = Self::request_id(response.headers());
-        let body = response.text().await.unwrap_or_default();
+        let body = response.text().unwrap_or_default();
         Err(CliClientError::Http {
             message: format!("signup failed ({status})"),
             body,
@@ -175,7 +125,7 @@ impl<T: TokenStore> ApiClient<T> {
     }
 
     /// Verify an account using the email and verification token
-    pub async fn verify(&self, email: Email, token: String) -> Result<(), CliClientError> {
+    pub fn verify(&self, email: Email, token: String) -> Result<(), CliClientError> {
         let payload = UseVerificationTicketRequestHttpBody {
             email: email.as_str().to_string(),
             token: Opaque::from(token),
@@ -187,7 +137,6 @@ impl<T: TokenStore> ApiClient<T> {
             .post(url)
             .json(&payload)
             .send()
-            .await
             .context("failed to execute verification request")?;
 
         if response.status().is_success() {
@@ -199,7 +148,7 @@ impl<T: TokenStore> ApiClient<T> {
 
         let status = response.status();
         let request_id = Self::request_id(response.headers());
-        let body = response.text().await.unwrap_or_default();
+        let body = response.text().unwrap_or_default();
         Err(CliClientError::Http {
             request_id,
             body,
