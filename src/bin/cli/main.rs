@@ -85,7 +85,8 @@ enum ItemCommands {
     },
 }
 
-fn main() -> Result<(), CliError> {
+#[tokio::main]
+async fn main() -> Result<(), CliError> {
     // Initialize tracing for logging
     tracing_subscriber::fmt::init();
 
@@ -100,13 +101,13 @@ fn main() -> Result<(), CliError> {
             AccountCommands::Signup { email } => {
                 let email = parse_email(&email)?;
                 let password = prompt_password("Password: ")?;
-                cli_client.signup(email, password)?;
+                cli_client.signup(email, password).await?;
                 output.success(&"Signup successful. Check your email for the verification token.");
                 Ok(())
             }
             AccountCommands::Verify { email, token } => {
                 let email = parse_email(&email)?;
-                cli_client.verify(email, token)?;
+                cli_client.verify(email, token).await?;
                 output.success(&"Verification successful. You can now log in.");
                 Ok(())
             }

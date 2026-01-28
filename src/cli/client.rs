@@ -15,8 +15,7 @@ use crate::{
 use anyhow::{Context, anyhow};
 use base64::{Engine, prelude::BASE64_STANDARD};
 use reqwest::{
-    Url,
-    blocking::Client,
+    Client, Url,
     header::{HeaderMap, HeaderValue},
 };
 use thiserror::Error;
@@ -43,7 +42,7 @@ pub enum CliClientError {
 
 impl<T: TokenStore> CliClient<T> {
     pub fn new(config: &Config, tokens: T) -> Result<Self, CliClientError> {
-        let base_url = Url::parse(config.server_url()).context("Invalid server URL")?;
+        let base_url = Url::parse(&config.server_url).context("Invalid server URL")?;
 
         let http = Client::builder()
             .timeout(Duration::from_secs(10))
@@ -74,7 +73,7 @@ impl<T: TokenStore> CliClient<T> {
     }
 
     /// Sign up a new account by generating an encrypted key pair and sending it to the server
-    pub fn signup(&self, email: Email, password: Password) -> Result<(), CliClientError> {
+    pub async fn signup(&self, email: Email, password: Password) -> Result<(), CliClientError> {
         let private_key = PrivateKey::generate();
         let encrypted_key_pair = private_key
             .encrypt_key_pair_with_password(password.clone())
@@ -105,6 +104,7 @@ impl<T: TokenStore> CliClient<T> {
             .post(url)
             .json(&payload)
             .send()
+            .await
             .context("failed to execute signup request")?;
 
         if response.status().is_success() {
@@ -116,7 +116,7 @@ impl<T: TokenStore> CliClient<T> {
 
         let status = response.status();
         let request_id = Self::request_id(response.headers());
-        let body = response.text().unwrap_or_default();
+        let body = response.text().await.unwrap_or_default();
         Err(CliClientError::Http {
             message: format!("signup failed ({status})"),
             body,
@@ -125,7 +125,7 @@ impl<T: TokenStore> CliClient<T> {
     }
 
     /// Verify an account using the email and verification token
-    pub fn verify(&self, email: Email, token: String) -> Result<(), CliClientError> {
+    pub async fn verify(&self, email: Email, token: String) -> Result<(), CliClientError> {
         let payload = UseVerificationTicketRequestHttpBody {
             email: email.as_str().to_string(),
             token: Opaque::from(token),
@@ -137,6 +137,7 @@ impl<T: TokenStore> CliClient<T> {
             .post(url)
             .json(&payload)
             .send()
+            .await
             .context("failed to execute verification request")?;
 
         if response.status().is_success() {
@@ -148,7 +149,7 @@ impl<T: TokenStore> CliClient<T> {
 
         let status = response.status();
         let request_id = Self::request_id(response.headers());
-        let body = response.text().unwrap_or_default();
+        let body = response.text().await.unwrap_or_default();
         Err(CliClientError::Http {
             request_id,
             body,
@@ -194,7 +195,9 @@ mod tests {
 
     #[test]
     fn test_url_builder() {
-        let config = Config::with_server_url("http://localhost:3000");
+        let config = Config {
+            server_url: "http://localhost:3000".to_owned(),
+        };
         let client = CliClient::new(&config, MemoryTokenStore::new()).unwrap();
         let url = client.url("/api/accounts/me").unwrap();
         assert_eq!(url.as_str(), "http://localhost:3000/api/accounts/me");
