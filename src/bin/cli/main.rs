@@ -67,7 +67,11 @@ enum AccountCommands {
     },
 
     /// Get current account information
-    Me,
+    Me {
+        /// Email address
+        #[arg(short, long)]
+        email: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -123,9 +127,10 @@ async fn main() -> Result<(), CliError> {
                 println!("Not yet implemented");
                 Ok(())
             }
-            AccountCommands::Me => {
-                println!("Me command");
-                println!("Not yet implemented");
+            AccountCommands::Me { email } => {
+                let email = parse_email(&email)?;
+                let me_response = cli_client.me(email.as_str()).await?;
+                output.account(&me_response);
                 Ok(())
             }
         },

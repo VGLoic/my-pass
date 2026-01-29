@@ -22,6 +22,16 @@ impl Output {
         }
     }
 
+    /// Display account information
+    pub fn account(&self, account: &my_pass::routes::accounts::MeResponse) {
+        if self.json_mode {
+            self.print_json(account);
+        } else {
+            println!("Email: {}", account.email);
+            println!("Created: {}", account.created_at);
+        }
+    }
+
     /// Print an error message
     pub fn error(&self, error: &CliError) {
         match error {
