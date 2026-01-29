@@ -10,7 +10,8 @@ use crate::{
     newtypes::{Email, Opaque, Password},
     routes::accounts::{
         EncryptedKeyPairHttpBody, LoginRequestHttpBody, LoginResponse, MeResponse,
-        SignUpRequestHttpBody, UseVerificationTicketRequestHttpBody,
+        NewVerificationTicketRequestHttpBody, SignUpRequestHttpBody,
+        UseVerificationTicketRequestHttpBody,
     },
 };
 use anyhow::{Context, anyhow};
@@ -229,6 +230,40 @@ impl<T: TokenStore> CliClient<T> {
             request_id,
             body,
             message: format!("me failed ({status})"),
+        })
+    }
+
+    /// Request a new verification ticket by providing email and password
+    pub async fn request_verification(
+        &self,
+        email: Email,
+        password: Password,
+    ) -> Result<(), CliClientError> {
+        let payload = NewVerificationTicketRequestHttpBody {
+            email: email.as_str().to_string(),
+            password: Opaque::from(password.unsafe_inner().to_owned()),
+        };
+        let url = self.url("/api/accounts/verification-tickets")?;
+
+        let response = self
+            .http
+            .post(url)
+            .json(&payload)
+            .send()
+            .await
+            .context("failed to execute request verification request")?;
+
+        if response.status().is_success() {
+            return Ok(());
+        }
+
+        let status = response.status();
+        let request_id = Self::request_id(response.headers());
+        let body = response.text().await.unwrap_or_default();
+        Err(CliClientError::Http {
+            request_id,
+            body,
+            message: format!("request verification failed ({status})"),
         })
     }
 }

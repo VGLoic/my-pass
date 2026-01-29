@@ -66,3 +66,12 @@ scripts/integration-test.sh
 
 - Make the plan extremely concise. Sacrifice grammar for the sake of concision.
 - At the end of each plan, give me a list of unresolved questions to answer, if any.
+- Favor plans where each step is completing one task only, e.g. implementation and its tests.
+
+### Before submitting changes for a step
+
+Ensure all code changes adhere to the above standards and guidelines.
+
+### Before starting a new step
+
+Make sure the previous step is fully complete and accepted. Commit all changes related to the previous step with a concise message summarizing the modifications made.

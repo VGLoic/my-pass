@@ -123,8 +123,10 @@ async fn main() -> Result<(), CliError> {
                 Ok(())
             }
             AccountCommands::RequestVerification { email } => {
-                println!("Request verification command: {}", email);
-                println!("Not yet implemented");
+                let email = parse_email(&email)?;
+                let password = prompt_password("Password: ")?;
+                cli_client.request_verification(email, password).await?;
+                output.success(&"Verification ticket requested. Check your email for the token.");
                 Ok(())
             }
             AccountCommands::Me { email } => {
