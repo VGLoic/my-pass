@@ -112,8 +112,10 @@ async fn main() -> Result<(), CliError> {
                 Ok(())
             }
             AccountCommands::Login { email } => {
-                println!("Login command: {}", email);
-                println!("Not yet implemented");
+                let email = parse_email(&email)?;
+                let password = prompt_password("Password: ")?;
+                cli_client.login(email, password).await?;
+                output.success(&"Login successful. Your session is now stored securely.");
                 Ok(())
             }
             AccountCommands::RequestVerification { email } => {

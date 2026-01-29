@@ -9,7 +9,8 @@ use crate::{
     crypto::keypair::PrivateKey,
     newtypes::{Email, Opaque, Password},
     routes::accounts::{
-        EncryptedKeyPairHttpBody, SignUpRequestHttpBody, UseVerificationTicketRequestHttpBody,
+        EncryptedKeyPairHttpBody, LoginRequestHttpBody, LoginResponse, MeResponse,
+        SignUpRequestHttpBody, UseVerificationTicketRequestHttpBody,
     },
 };
 use anyhow::{Context, anyhow};
@@ -154,6 +155,80 @@ impl<T: TokenStore> CliClient<T> {
             request_id,
             body,
             message: format!("verification failed ({status})"),
+        })
+    }
+
+    /// Login with email and password, storing the JWT for future authenticated requests
+    pub async fn login(&self, email: Email, password: Password) -> Result<(), CliClientError> {
+        let payload = LoginRequestHttpBody {
+            email: email.as_str().to_string(),
+            password: Opaque::from(password.unsafe_inner().to_owned()),
+        };
+        let url = self.url("/api/accounts/login")?;
+
+        let response = self
+            .http
+            .post(url)
+            .json(&payload)
+            .send()
+            .await
+            .context("failed to execute login request")?;
+
+        if response.status().is_success() {
+            let response_body = response
+                .json::<LoginResponse>()
+                .await
+                .context("failed to parse login response")?;
+
+            self.tokens
+                .save(email.as_str(), response_body.access_token.unsafe_inner())
+                .context("failed to save token")?;
+            return Ok(());
+        }
+
+        let status = response.status();
+        let request_id = Self::request_id(response.headers());
+        let body = response.text().await.unwrap_or_default();
+        Err(CliClientError::Http {
+            request_id,
+            body,
+            message: format!("login failed ({status})"),
+        })
+    }
+
+    /// Fetch current account information using stored JWT
+    pub async fn me(&self, email: &str) -> Result<MeResponse, CliClientError> {
+        let token = self
+            .tokens
+            .load(email)
+            .context("failed to load token")?
+            .ok_or_else(|| anyhow!("no token found - please login first"))?;
+
+        let url = self.url("/api/accounts/me")?;
+
+        let response = self
+            .http
+            .get(url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .context("failed to execute me request")?;
+
+        if response.status().is_success() {
+            let response_body = response
+                .json::<MeResponse>()
+                .await
+                .context("failed to parse me response")?;
+            return Ok(response_body);
+        }
+
+        let status = response.status();
+        let request_id = Self::request_id(response.headers());
+        let body = response.text().await.unwrap_or_default();
+        Err(CliClientError::Http {
+            request_id,
+            body,
+            message: format!("me failed ({status})"),
         })
     }
 }
