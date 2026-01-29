@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use super::{config::Config, tokenstore::TokenStore};
 use crate::{
-    crypto::keypair::PrivateKey,
+    crypto::keypair::{EncryptedKeyPair, PrivateKey, SymmetricKey},
     newtypes::{Email, Opaque, Password},
     routes::accounts::{
         EncryptedKeyPairHttpBody, LoginRequestHttpBody, LoginResponse, MeResponse,
@@ -56,6 +56,11 @@ impl<T: TokenStore> CliClient<T> {
             http,
             tokens,
         })
+    }
+
+    /// Load a token for the given email
+    pub async fn get_token(&self, email: &str) -> Result<Option<String>, CliClientError> {
+        self.tokens.load(email).map_err(CliClientError::from)
     }
 
     /// Build a full URL from a path (e.g., "/api/accounts/me")
@@ -265,6 +270,132 @@ impl<T: TokenStore> CliClient<T> {
             body,
             message: format!("request verification failed ({status})"),
         })
+    }
+
+    /// Add a new encrypted item to the vault
+    async fn add_item(
+        &self,
+        email: &str,
+        plaintext: &[u8],
+        private_key: &PrivateKey,
+    ) -> Result<(), CliClientError> {
+        let token = self
+            .tokens
+            .load(email)
+            .context("failed to load token")?
+            .ok_or_else(|| anyhow!("no token found - please login first"))?;
+
+        // Encrypt the item data
+        let encapsulated_symmetric_key =
+            SymmetricKey::encapsulate(&private_key.encapsulation_public_key())
+                .context("failed to encapsulate symmetric key")?;
+        let encryption_nonce: [u8; 12] = fake::rand::random();
+        let ciphertext = encapsulated_symmetric_key
+            .symmetric_key()
+            .encrypt(plaintext, &encryption_nonce)
+            .context("failed to encrypt item")?;
+        let (signature_r, signature_s) = private_key
+            .sign(&ciphertext)
+            .context("failed to sign item")?;
+        let mut signature = Vec::new();
+        signature.extend_from_slice(&signature_r);
+        signature.extend_from_slice(&signature_s);
+
+        let payload = serde_json::json!({
+            "ciphertext": BASE64_STANDARD.encode(&ciphertext),
+            "encryptionNonce": BASE64_STANDARD.encode(encryption_nonce),
+            "ephemeralPublicKey": BASE64_STANDARD.encode(
+                encapsulated_symmetric_key.ephemeral_public_key().to_bytes().unsafe_inner()
+            ),
+            "signature": BASE64_STANDARD.encode(&signature),
+        });
+
+        let url = self.url("/api/items")?;
+
+        let response = self
+            .http
+            .post(url)
+            .bearer_auth(&token)
+            .json(&payload)
+            .send()
+            .await
+            .context("failed to execute add item request")?;
+
+        if response.status().is_success() {
+            return Ok(());
+        }
+
+        let status = response.status();
+        let request_id = Self::request_id(response.headers());
+        let body = response.text().await.unwrap_or_default();
+        Err(CliClientError::Http {
+            request_id,
+            body,
+            message: format!("add item failed ({status})"),
+        })
+    }
+
+    /// Add a new encrypted item to the vault by automatically retrieving and decrypting the private key
+    pub async fn add_item_with_password(
+        &self,
+        email: &str,
+        plaintext: &[u8],
+        password: Password,
+    ) -> Result<(), CliClientError> {
+        // Get the encrypted key pair from the account
+        let me_response = self.me(email).await?;
+
+        // Decode the encrypted key pair from base64
+        let symmetric_key_salt = BASE64_STANDARD
+            .decode(
+                me_response
+                    .encrypted_key_pair
+                    .symmetric_key_salt
+                    .unsafe_inner(),
+            )
+            .context("failed to decode symmetric_key_salt")?;
+        let encryption_nonce = BASE64_STANDARD
+            .decode(
+                me_response
+                    .encrypted_key_pair
+                    .encryption_nonce
+                    .unsafe_inner(),
+            )
+            .context("failed to decode encryption_nonce")?;
+        let ciphertext = BASE64_STANDARD
+            .decode(me_response.encrypted_key_pair.ciphertext.unsafe_inner())
+            .context("failed to decode ciphertext")?;
+        let public_key = BASE64_STANDARD
+            .decode(me_response.encrypted_key_pair.public_key.unsafe_inner())
+            .context("failed to decode public_key")?;
+
+        // Convert arrays
+        let symmetric_key_salt: [u8; 16] = symmetric_key_salt
+            .try_into()
+            .map_err(|_| anyhow!("symmetric_key_salt must be 16 bytes"))?;
+        let encryption_nonce: [u8; 12] = encryption_nonce
+            .try_into()
+            .map_err(|_| anyhow!("encryption_nonce must be 12 bytes"))?;
+        let public_key: [u8; 32] = public_key
+            .try_into()
+            .map_err(|_| anyhow!("public_key must be 32 bytes"))?;
+
+        // Create EncryptedKeyPair and decrypt
+        let encrypted_key_pair = EncryptedKeyPair::new(
+            password,
+            Opaque::new(symmetric_key_salt),
+            Opaque::new(encryption_nonce),
+            Opaque::new(ciphertext),
+            Opaque::new(public_key),
+        )
+        .context("failed to create encrypted key pair")?;
+
+        let private_key = encrypted_key_pair
+            .decrypt_private_key()
+            .context("failed to decrypt private key")?;
+
+        // Now add the item with the decrypted private key
+        self.add_item(email, plaintext, &private_key).await
     }
 }
 

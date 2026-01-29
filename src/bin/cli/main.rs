@@ -76,8 +76,12 @@ enum AccountCommands {
 
 #[derive(Subcommand)]
 enum ItemCommands {
-    /// Add a new vault item (reads JSON from stdin)
-    Add,
+    /// Add a new vault item (reads plaintext from stdin)
+    Add {
+        /// Email address
+        #[arg(short, long)]
+        email: String,
+    },
 
     /// List all vault items
     List,
@@ -137,9 +141,22 @@ async fn main() -> Result<(), CliError> {
             }
         },
         Commands::Item(item_cmd) => match item_cmd {
-            ItemCommands::Add => {
-                println!("Add command");
-                println!("Not yet implemented");
+            ItemCommands::Add { email } => {
+                let email = parse_email(&email)?;
+                let password = prompt_password("Password: ")?;
+
+                // Read plaintext from stdin
+                eprint!("Enter item plaintext: ");
+                let mut plaintext = String::new();
+                std::io::stdin()
+                    .read_line(&mut plaintext)
+                    .map_err(|e| anyhow!("Failed to read from stdin: {}", e))?;
+                let plaintext = plaintext.trim().as_bytes();
+
+                cli_client
+                    .add_item_with_password(email.as_str(), plaintext, password)
+                    .await?;
+                output.success(&"Item added successfully.");
                 Ok(())
             }
             ItemCommands::List => {

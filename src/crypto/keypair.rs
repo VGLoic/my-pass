@@ -103,6 +103,47 @@ impl EncryptedKeyPair {
     pub fn public_key(&self) -> &Opaque<[u8; 32]> {
         &self.public_key
     }
+
+    /// Decrypts the private key using the stored password.
+    /// # Returns
+    /// Returns the decrypted PrivateKey.
+    pub fn decrypt_private_key(&self) -> Result<PrivateKey, anyhow::Error> {
+        let mut encryption_key_material = [0u8; 32];
+        argon2instance::argon2_instance()
+            .hash_password_into(
+                self.password.unsafe_inner().as_bytes(),
+                self.symmetric_key_salt.unsafe_inner(),
+                &mut encryption_key_material,
+            )
+            .map_err(|e| anyhow!("{e}").context("Failed to generate encryption key material"))?;
+
+        let aes_gcm_key = Key::<Aes256Gcm>::from_slice(&encryption_key_material);
+        let cipher = Aes256Gcm::new(aes_gcm_key);
+
+        let encryption_nonce_formatted =
+            Nonce::<Aes256Gcm>::from_slice(self.encryption_nonce.unsafe_inner());
+
+        let decrypted_private_key = cipher
+            .decrypt(
+                encryption_nonce_formatted,
+                self.ciphertext.unsafe_inner().as_slice(),
+            )
+            .map_err(|e| anyhow!("{e}").context("Failed to decrypt private key"))?;
+
+        if decrypted_private_key.len() != 32 {
+            return Err(anyhow!("Invalid decrypted private key length"));
+        }
+
+        let decrypted_private_key: [u8; 32] = {
+            let mut array = [0u8; 32];
+            array.copy_from_slice(&decrypted_private_key);
+            array
+        };
+
+        Ok(PrivateKey {
+            key: decrypted_private_key,
+        })
+    }
 }
 
 pub struct PrivateKey {

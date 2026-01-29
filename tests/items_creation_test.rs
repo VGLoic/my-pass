@@ -19,7 +19,7 @@ use my_pass::{
 use crate::common::default_test_secrets_manager;
 
 #[tokio::test]
-async fn test_item_creation() {
+async fn test_item_creation_api() {
     let instance_state = setup_instance(default_test_config(), default_test_secrets_manager())
         .await
         .unwrap();
@@ -156,4 +156,72 @@ async fn test_item_creation() {
         .unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].ciphertext, BASE64_STANDARD.encode(&ciphertext));
+}
+
+#[tokio::test]
+async fn test_item_creation_cli() {
+    let instance_state = setup_instance(default_test_config(), default_test_secrets_manager())
+        .await
+        .unwrap();
+
+    let cli_client =
+        common::cli::setup_cli_client(common::cli::cli_config_from_instance_state(&instance_state))
+            .unwrap();
+
+    let email = Faker.fake::<Email>();
+    let password = Faker.fake::<Password>();
+
+    // Sign up using the CLI
+    assert!(
+        cli_client
+            .signup(email.clone(), password.clone())
+            .await
+            .is_ok()
+    );
+
+    let verification_tickets = instance_state
+        .accounts_notifier
+        .get_signed_up_tickets(email.as_str());
+    assert_eq!(verification_tickets.len(), 1);
+    let last_ticket = verification_tickets.last().unwrap();
+
+    // Verify account using CLI
+    assert!(
+        cli_client
+            .verify(email.clone(), last_ticket.token.unsafe_inner().clone())
+            .await
+            .is_ok()
+    );
+
+    // Login using CLI
+    assert!(
+        cli_client
+            .login(email.clone(), password.clone())
+            .await
+            .is_ok()
+    );
+
+    // Add item using CLI (which will automatically decrypt the private key with the password)
+    let item_plaintext = "my secret item";
+    assert!(
+        cli_client
+            .add_item_with_password(email.as_str(), item_plaintext.as_bytes(), password)
+            .await
+            .is_ok()
+    );
+
+    // Verify item was created by checking via API with token from store
+    let token = cli_client.get_token(email.as_str()).await.unwrap().unwrap();
+
+    let items_response = instance_state
+        .reqwest_client
+        .get(format!("{}/api/items", &instance_state.server_url))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(items_response.status(), StatusCode::OK);
+    let items = items_response.json::<Vec<ItemResponse>>().await.unwrap();
+    assert_eq!(items.len(), 1);
 }
