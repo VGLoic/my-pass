@@ -84,7 +84,11 @@ enum ItemCommands {
     },
 
     /// List all vault items
-    List,
+    List {
+        /// Email address
+        #[arg(short, long)]
+        email: String,
+    },
 
     /// Get a specific vault item by ID
     Get {
@@ -159,9 +163,30 @@ async fn main() -> Result<(), CliError> {
                 output.success(&"Item added successfully.");
                 Ok(())
             }
-            ItemCommands::List => {
-                println!("List command");
-                println!("Not yet implemented");
+            ItemCommands::List { email } => {
+                let email = parse_email(&email)?;
+                let password = prompt_password("Password: ")?;
+
+                let items = cli_client
+                    .list_items_with_password(email.as_str(), password)
+                    .await?;
+
+                if items.is_empty() {
+                    output.success(&"No items found.");
+                } else {
+                    for (item, plaintext) in items {
+                        if cli.json {
+                            output.success(&serde_json::json!({
+                                "id": item.id,
+                                "plaintext": plaintext,
+                                "createdAt": item.created_at,
+                                "updatedAt": item.updated_at,
+                            }));
+                        } else {
+                            println!("[{}] {} (created: {})", item.id, plaintext, item.created_at);
+                        }
+                    }
+                }
                 Ok(())
             }
             ItemCommands::Get { id } => {

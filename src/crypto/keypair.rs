@@ -194,8 +194,6 @@ impl PrivateKey {
     /// * `encapsulated_symmetric_key` - The encapsulated symmetric key to be decapsulated
     /// # Returns
     /// Returns the decapsulated symmetric key.
-    #[cfg(test)]
-    #[allow(dead_code)]
     pub fn decapsulate(
         &self,
         ephemeral_public_key: &EncapsulationPublicKey,
@@ -357,8 +355,6 @@ impl SymmetricKey {
         Ok(ciphertext)
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
     pub fn decrypt(&self, ciphertext: &[u8], nonce: &[u8; 12]) -> Result<Vec<u8>, anyhow::Error> {
         let aes_gcm_key = Key::<Aes256Gcm>::from_slice(&self.key);
         let cipher = Aes256Gcm::new(aes_gcm_key);

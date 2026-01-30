@@ -13,6 +13,7 @@ use crate::{
         NewVerificationTicketRequestHttpBody, SignUpRequestHttpBody,
         UseVerificationTicketRequestHttpBody,
     },
+    routes::items::ItemResponse,
 };
 use anyhow::{Context, anyhow};
 use base64::{Engine, prelude::BASE64_STANDARD};
@@ -335,13 +336,12 @@ impl<T: TokenStore> CliClient<T> {
         })
     }
 
-    /// Add a new encrypted item to the vault by automatically retrieving and decrypting the private key
-    pub async fn add_item_with_password(
+    /// Derive the private key from ME response and password
+    async fn derive_private_key_from_password(
         &self,
         email: &str,
-        plaintext: &[u8],
         password: Password,
-    ) -> Result<(), CliClientError> {
+    ) -> Result<PrivateKey, CliClientError> {
         // Get the encrypted key pair from the account
         let me_response = self.me(email).await?;
 
@@ -390,12 +390,115 @@ impl<T: TokenStore> CliClient<T> {
         )
         .context("failed to create encrypted key pair")?;
 
-        let private_key = encrypted_key_pair
+        encrypted_key_pair
             .decrypt_private_key()
-            .context("failed to decrypt private key")?;
+            .context("failed to decrypt private key")
+            .map_err(CliClientError::from)
+    }
 
-        // Now add the item with the decrypted private key
+    /// Add a new encrypted item to the vault by automatically retrieving and decrypting the private key
+    pub async fn add_item_with_password(
+        &self,
+        email: &str,
+        plaintext: &[u8],
+        password: Password,
+    ) -> Result<(), CliClientError> {
+        let private_key = self
+            .derive_private_key_from_password(email, password)
+            .await?;
         self.add_item(email, plaintext, &private_key).await
+    }
+
+    /// Fetch and decrypt all items for the user
+    async fn fetch_items(&self, email: &str) -> Result<Vec<ItemResponse>, CliClientError> {
+        let token = self
+            .tokens
+            .load(email)
+            .context("failed to load token")?
+            .ok_or_else(|| anyhow!("no token found - please login first"))?;
+
+        let url = self.url("/api/items")?;
+
+        let response = self
+            .http
+            .get(url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .context("failed to execute list items request")?;
+
+        if response.status().is_success() {
+            let items = response
+                .json::<Vec<ItemResponse>>()
+                .await
+                .context("failed to parse items response")?;
+            return Ok(items);
+        }
+
+        let status = response.status();
+        let request_id = Self::request_id(response.headers());
+        let body = response.text().await.unwrap_or_default();
+        Err(CliClientError::Http {
+            request_id,
+            body,
+            message: format!("list items failed ({status})"),
+        })
+    }
+
+    /// List and decrypt all items for the user
+    pub async fn list_items_with_password(
+        &self,
+        email: &str,
+        password: Password,
+    ) -> Result<Vec<(ItemResponse, String)>, CliClientError> {
+        let private_key = self
+            .derive_private_key_from_password(email, password)
+            .await?;
+
+        // Fetch encrypted items
+        let items = self.fetch_items(email).await?;
+
+        // Decrypt each item
+        let mut decrypted_items = Vec::new();
+        for item in items {
+            let ephemeral_public_key_bytes = BASE64_STANDARD
+                .decode(&item.ephemeral_public_key)
+                .context("failed to decode ephemeral_public_key")?;
+            let ephemeral_public_key: [u8; 32] = ephemeral_public_key_bytes
+                .try_into()
+                .map_err(|_| anyhow!("ephemeral_public_key must be 32 bytes"))?;
+
+            let ciphertext_bytes = BASE64_STANDARD
+                .decode(&item.ciphertext)
+                .context("failed to decode ciphertext")?;
+
+            let encryption_nonce_bytes = BASE64_STANDARD
+                .decode(&item.encryption_nonce)
+                .context("failed to decode encryption_nonce")?;
+            let encryption_nonce: [u8; 12] = encryption_nonce_bytes
+                .try_into()
+                .map_err(|_| anyhow!("encryption_nonce must be 12 bytes"))?;
+
+            // Decapsulate the symmetric key using our private key
+            let encapsulation_public_key = crate::crypto::keypair::EncapsulationPublicKey::new(
+                Opaque::new(ephemeral_public_key),
+            );
+            let symmetric_key = private_key
+                .decapsulate(&encapsulation_public_key)
+                .context("failed to decapsulate symmetric key")?;
+
+            // Decrypt the item plaintext
+            let plaintext = symmetric_key
+                .decrypt(&ciphertext_bytes, &encryption_nonce)
+                .context("failed to decrypt item")?;
+
+            let plaintext_string =
+                String::from_utf8(plaintext).context("item plaintext is not valid UTF-8")?;
+
+            decrypted_items.push((item, plaintext_string));
+        }
+
+        Ok(decrypted_items)
     }
 }
 

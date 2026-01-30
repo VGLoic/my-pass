@@ -171,7 +171,7 @@ async fn test_item_creation_cli() {
     let email = Faker.fake::<Email>();
     let password = Faker.fake::<Password>();
 
-    // Sign up using the CLI
+    // Sign up using CLI
     assert!(
         cli_client
             .signup(email.clone(), password.clone())
@@ -205,7 +205,7 @@ async fn test_item_creation_cli() {
     let item_plaintext = "my secret item";
     assert!(
         cli_client
-            .add_item_with_password(email.as_str(), item_plaintext.as_bytes(), password)
+            .add_item_with_password(email.as_str(), item_plaintext.as_bytes(), password.clone())
             .await
             .is_ok()
     );
@@ -224,4 +224,13 @@ async fn test_item_creation_cli() {
     assert_eq!(items_response.status(), StatusCode::OK);
     let items = items_response.json::<Vec<ItemResponse>>().await.unwrap();
     assert_eq!(items.len(), 1);
+
+    // List items using CLI
+    let listed_items = cli_client
+        .list_items_with_password(email.as_str(), password)
+        .await
+        .unwrap();
+
+    assert_eq!(listed_items.len(), 1);
+    assert_eq!(listed_items[0].1, item_plaintext);
 }
