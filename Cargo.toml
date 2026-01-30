@@ -3,6 +3,18 @@ name = "my-pass"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "my-pass-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "my-pass-cli"
+path = "src/bin/cli/main.rs"
+
+[lib]
+name = "my_pass"
+path = "src/lib.rs"
+
 [dependencies]
 aes-gcm = "0.10.3"
 anyhow = { version = "1.0.100" }
@@ -11,10 +23,14 @@ async-trait = "0.1.89"
 axum = { version = "0.8.7", features = ["macros"] }
 base64 = "0.22.1"
 chrono = { version = "0.4.42", features = ["serde"] }
+clap = { version = "4.5.54", features = ["derive"] }
 dotenvy = { version = "0.15.7" }
 ed25519-dalek = "2.2.0"
 fake = { version = "4.4.0", features = ["chrono"] }
 jsonwebtoken = { version = "10.2.0", default-features = false, features = ["rust_crypto"] }
+keyring = "3.6.3"
+reqwest = { version = "0.12.25", features = ["json", "blocking"] }
+rpassword = "7.4.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "postgres", "uuid", "chrono"] }
@@ -28,5 +44,4 @@ validator = "0.20.0"
 x25519-dalek = { version = "2.0.1", features = ["getrandom", "static_secrets"] }
 
 [dev-dependencies]
-reqwest = { version = "0.12.25", features = ["json", "blocking"] }
 sqlx-cli = "0.8.6"

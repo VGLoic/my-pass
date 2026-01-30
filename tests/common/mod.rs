@@ -18,6 +18,8 @@ use std::{
 use tracing::{Level, error, level_filters::LevelFilter};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
+pub mod cli;
+
 #[allow(dead_code)]
 pub struct InstanceState {
     pub reqwest_client: reqwest::Client,
